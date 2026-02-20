@@ -334,6 +334,7 @@ export class SVGParser {
 
   /**
    * Convert parsed path to movement commands
+   * IMPORTANT: Uses lineTo (relative deltas) for pen-down moves, moveTo (absolute) for pen-up
    */
   _pathToCommands(pathObj) {
     const commands = [];
@@ -359,6 +360,10 @@ export class SVGParser {
     let pathStartY = 0;
     let penDown = false;
 
+    // Track transformed position for calculating relative deltas
+    let lastTransformedX = 0;
+    let lastTransformedY = 0;
+
     for (const cmd of pathCommands) {
       switch (cmd.code) {
         case 'M': // Move to
@@ -374,6 +379,8 @@ export class SVGParser {
             currentY = cmd.y;
             pathStartX = currentX;
             pathStartY = currentY;
+            lastTransformedX = p.x;
+            lastTransformedY = p.y;
           }
           break;
 
@@ -384,9 +391,14 @@ export class SVGParser {
           }
           {
             const p = this._applyTransforms(cmd.x, cmd.y, transforms);
-            commands.push({ type: 'moveTo', x: p.x, y: p.y, units: 'mm' });
+            // Use lineTo with relative deltas (pen stays down)
+            const dx = p.x - lastTransformedX;
+            const dy = p.y - lastTransformedY;
+            commands.push({ type: 'lineTo', dx, dy, units: 'mm' });
             currentX = cmd.x;
             currentY = cmd.y;
+            lastTransformedX = p.x;
+            lastTransformedY = p.y;
           }
           break;
 
@@ -397,8 +409,12 @@ export class SVGParser {
           }
           {
             const p = this._applyTransforms(cmd.x, currentY, transforms);
-            commands.push({ type: 'moveTo', x: p.x, y: p.y, units: 'mm' });
+            const dx = p.x - lastTransformedX;
+            const dy = p.y - lastTransformedY;
+            commands.push({ type: 'lineTo', dx, dy, units: 'mm' });
             currentX = cmd.x;
+            lastTransformedX = p.x;
+            lastTransformedY = p.y;
           }
           break;
 
@@ -409,8 +425,12 @@ export class SVGParser {
           }
           {
             const p = this._applyTransforms(currentX, cmd.y, transforms);
-            commands.push({ type: 'moveTo', x: p.x, y: p.y, units: 'mm' });
+            const dx = p.x - lastTransformedX;
+            const dy = p.y - lastTransformedY;
+            commands.push({ type: 'lineTo', dx, dy, units: 'mm' });
             currentY = cmd.y;
+            lastTransformedX = p.x;
+            lastTransformedY = p.y;
           }
           break;
 
@@ -428,7 +448,11 @@ export class SVGParser {
             );
             for (const pt of points) {
               const p = this._applyTransforms(pt.x, pt.y, transforms);
-              commands.push({ type: 'moveTo', x: p.x, y: p.y, units: 'mm' });
+              const dx = p.x - lastTransformedX;
+              const dy = p.y - lastTransformedY;
+              commands.push({ type: 'lineTo', dx, dy, units: 'mm' });
+              lastTransformedX = p.x;
+              lastTransformedY = p.y;
             }
             currentX = cmd.x;
             currentY = cmd.y;
@@ -448,7 +472,11 @@ export class SVGParser {
             );
             for (const pt of points) {
               const p = this._applyTransforms(pt.x, pt.y, transforms);
-              commands.push({ type: 'moveTo', x: p.x, y: p.y, units: 'mm' });
+              const dx = p.x - lastTransformedX;
+              const dy = p.y - lastTransformedY;
+              commands.push({ type: 'lineTo', dx, dy, units: 'mm' });
+              lastTransformedX = p.x;
+              lastTransformedY = p.y;
             }
             currentX = cmd.x;
             currentY = cmd.y;
@@ -471,7 +499,11 @@ export class SVGParser {
             );
             for (const pt of points) {
               const p = this._applyTransforms(pt.x, pt.y, transforms);
-              commands.push({ type: 'moveTo', x: p.x, y: p.y, units: 'mm' });
+              const dx = p.x - lastTransformedX;
+              const dy = p.y - lastTransformedY;
+              commands.push({ type: 'lineTo', dx, dy, units: 'mm' });
+              lastTransformedX = p.x;
+              lastTransformedY = p.y;
             }
             currentX = cmd.x;
             currentY = cmd.y;
@@ -486,9 +518,13 @@ export class SVGParser {
               penDown = true;
             }
             const p = this._applyTransforms(pathStartX, pathStartY, transforms);
-            commands.push({ type: 'moveTo', x: p.x, y: p.y, units: 'mm' });
+            const dx = p.x - lastTransformedX;
+            const dy = p.y - lastTransformedY;
+            commands.push({ type: 'lineTo', dx, dy, units: 'mm' });
             currentX = pathStartX;
             currentY = pathStartY;
+            lastTransformedX = p.x;
+            lastTransformedY = p.y;
           }
           break;
       }

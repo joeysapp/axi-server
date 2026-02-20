@@ -14,6 +14,74 @@ import { JobQueue, JobState, JobPriority } from './lib/job-queue.js';
 import { SVGParser } from './lib/svg-parser.js';
 import { EBBSerial } from './lib/ebb-serial.js';
 
+// Command coalescing buffers for real-time input smoothing
+// Separate buffers per unit type to avoid conversion issues
+const coalesceBuffers = {
+  move: { mm: { dx: 0, dy: 0 }, inches: { dx: 0, dy: 0 }, steps: { dx: 0, dy: 0 }, timer: null, pending: [] },
+  lineto: { mm: { dx: 0, dy: 0 }, inches: { dx: 0, dy: 0 }, steps: { dx: 0, dy: 0 }, timer: null, pending: [] }
+};
+
+/**
+ * Flush coalesced movement buffer
+ * @param {string} type - 'move' or 'lineto'
+ * @param {object} axi - AxiDraw instance
+ */
+async function flushCoalesceBuffer(type, axi) {
+  const buffer = coalesceBuffers[type];
+  buffer.timer = null;
+
+  // Process each unit type that has accumulated movement
+  for (const units of ['mm', 'inches', 'steps']) {
+    const { dx, dy } = buffer[units];
+    if (dx !== 0 || dy !== 0) {
+      try {
+        if (type === 'move') {
+          await axi.move(dx, dy, units);
+        } else {
+          await axi.lineTo(dx, dy, units);
+        }
+      } catch (e) {
+        console.error(`[Coalesce] Error flushing ${type} (${units}):`, e.message);
+      }
+      buffer[units].dx = 0;
+      buffer[units].dy = 0;
+    }
+  }
+
+  // Resolve all pending responses
+  const position = axi.motion?.getPosition();
+  for (const resolve of buffer.pending) {
+    resolve(position);
+  }
+  buffer.pending = [];
+}
+
+/**
+ * Add movement to coalesce buffer
+ * @param {string} type - 'move' or 'lineto'
+ * @param {number} dx - Delta X
+ * @param {number} dy - Delta Y
+ * @param {string} units - 'mm', 'inches', or 'steps'
+ * @param {number} coalesceMs - Flush interval in ms
+ * @param {object} axi - AxiDraw instance
+ * @returns {Promise<object>} Position after flush
+ */
+function addToCoalesceBuffer(type, dx, dy, units, coalesceMs, axi) {
+  const buffer = coalesceBuffers[type];
+  const unitBuffer = buffer[units] || buffer.mm; // Default to mm
+
+  unitBuffer.dx += dx;
+  unitBuffer.dy += dy;
+
+  return new Promise((resolve) => {
+    buffer.pending.push(resolve);
+
+    if (!buffer.timer) {
+      buffer.timer = setTimeout(() => flushCoalesceBuffer(type, axi), coalesceMs);
+    }
+  });
+}
+
 // Configuration from environment
 const PORT = parseInt(process.env.AXIDRAW_PORT || '9700', 10);
 const HOST = process.env.AXIDRAW_HOST || '0.0.0.0';
@@ -109,10 +177,11 @@ const API_DOCS = {
 
     // Motion
     'POST /home': 'Move to home position (0,0) - body: { rate?: number }',
-    'POST /move': 'Relative move (pen up) - body: { dx, dy, units?: "mm"|"inches"|"steps" }',
+    'POST /move': 'Relative move (pen up) - body: { dx, dy, units?: "mm"|"inches"|"steps" }, query: ?coalesce=50 (ms)',
     'POST /moveto': 'Absolute move (pen up) - body: { x, y, units?: "mm"|"inches"|"steps" }',
-    'POST /lineto': 'Draw line (pen down) - body: { dx, dy, units?: "mm"|"inches"|"steps" }',
+    'POST /lineto': 'Draw line (pen down) - body: { dx, dy, units?: "mm"|"inches"|"steps" }, query: ?coalesce=50 (ms)',
     'POST /execute': 'Execute command sequence - body: { commands: [...] }',
+    'POST /batch': 'Execute multiple endpoints atomically - body: { commands: [{endpoint, body?}, ...] }',
     'GET /position': 'Get current position',
     'GET /speed': 'Get current speed settings',
     'POST /speed': 'Set speed settings - body: { penDown?: number, penUp?: number } (inches/sec)',
@@ -131,6 +200,7 @@ const API_DOCS = {
 
     // SVG
     'POST /svg': 'Parse and queue SVG for drawing - body: { svg: string, name?, options? }',
+    'POST /svg/upload': 'Upload SVG file (multipart/form-data) - form field: file',
     'POST /svg/preview': 'Parse SVG and return commands without drawing - body: { svg: string, options? }'
   },
   commandTypes: {
@@ -190,6 +260,131 @@ async function parseBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+/**
+ * Parse multipart form data (simple implementation for file uploads)
+ * @param {http.IncomingMessage} req - Request object
+ * @returns {Promise<{fields: object, files: object}>}
+ */
+async function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const contentType = req.headers['content-type'] || '';
+    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/);
+    if (!boundaryMatch) {
+      reject(new Error('Missing boundary in multipart request'));
+      return;
+    }
+    const boundary = boundaryMatch[1] || boundaryMatch[2];
+
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      const parts = parseMultipartBuffer(buffer, boundary);
+      resolve(parts);
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Parse multipart buffer into fields and files
+ */
+function parseMultipartBuffer(buffer, boundary) {
+  const fields = {};
+  const files = {};
+  const boundaryBuffer = Buffer.from('--' + boundary);
+  const endBoundary = Buffer.from('--' + boundary + '--');
+
+  let start = buffer.indexOf(boundaryBuffer) + boundaryBuffer.length + 2; // Skip \r\n
+
+  while (start < buffer.length) {
+    const nextBoundary = buffer.indexOf(boundaryBuffer, start);
+    if (nextBoundary === -1) break;
+
+    const partEnd = nextBoundary - 2; // Exclude \r\n before boundary
+    const partData = buffer.slice(start, partEnd);
+
+    // Find header/body separator (double CRLF)
+    const headerEnd = partData.indexOf('\r\n\r\n');
+    if (headerEnd === -1) {
+      start = nextBoundary + boundaryBuffer.length + 2;
+      continue;
+    }
+
+    const headers = partData.slice(0, headerEnd).toString('utf8');
+    const body = partData.slice(headerEnd + 4);
+
+    // Parse Content-Disposition
+    const nameMatch = headers.match(/name="([^"]+)"/);
+    const filenameMatch = headers.match(/filename="([^"]+)"/);
+
+    if (nameMatch) {
+      const name = nameMatch[1];
+      if (filenameMatch) {
+        // It's a file
+        const contentTypeMatch = headers.match(/Content-Type:\s*([^\r\n]+)/i);
+        files[name] = {
+          filename: filenameMatch[1],
+          contentType: contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream',
+          data: body
+        };
+      } else {
+        // It's a field
+        fields[name] = body.toString('utf8');
+      }
+    }
+
+    start = nextBoundary + boundaryBuffer.length + 2;
+
+    // Check for end boundary
+    if (buffer.slice(nextBoundary, nextBoundary + endBoundary.length).equals(endBoundary)) {
+      break;
+    }
+  }
+
+  return { fields, files };
+}
+
+/**
+ * Execute a batch command (subset of endpoints that make sense for batching)
+ * @param {string} endpoint - Endpoint path (e.g., '/pen/up', '/moveto')
+ * @param {object} body - Request body
+ * @returns {Promise<object>} Result data
+ */
+async function executeBatchCommand(endpoint, body) {
+  switch (endpoint) {
+    case '/pen/up':
+      return { time: await axi.penUp() };
+    case '/pen/down':
+      return { time: await axi.penDown() };
+    case '/pen/toggle':
+      return { time: await axi.penToggle(), isUp: axi.servo?.isUp };
+    case '/home':
+      await axi.home(body.rate);
+      return {};
+    case '/move':
+      await axi.move(body.dx ?? 0, body.dy ?? 0, body.units || 'mm');
+      return { position: axi.motion?.getPosition() };
+    case '/moveto':
+      await axi.moveTo(body.x ?? 0, body.y ?? 0, body.units || 'mm');
+      return { position: axi.motion?.getPosition() };
+    case '/lineto':
+      await axi.lineTo(body.dx ?? 0, body.dy ?? 0, body.units || 'mm');
+      return { position: axi.motion?.getPosition() };
+    case '/motors/on':
+      await axi.motorsOn();
+      return {};
+    case '/motors/off':
+      await axi.motorsOff();
+      return {};
+    case '/pause':
+      await new Promise(resolve => setTimeout(resolve, body.ms || 100));
+      return { paused: body.ms || 100 };
+    default:
+      throw new Error(`Endpoint not supported in batch: ${endpoint}`);
+  }
 }
 
 // Request handler
@@ -362,7 +557,17 @@ async function handleRequest(req, res) {
         sendError(res, 'Missing dx or dy parameters');
         return;
       }
-      await axi.move(body.dx, body.dy, body.units || 'mm');
+      const units = body.units || 'mm';
+      const coalesceMs = parseInt(url.searchParams.get('coalesce') || '0', 10);
+
+      if (coalesceMs > 0) {
+        // Buffer the movement and flush after coalesceMs
+        const position = await addToCoalesceBuffer('move', body.dx, body.dy, units, coalesceMs, axi);
+        sendSuccess(res, { buffered: true, position });
+        return;
+      }
+
+      await axi.move(body.dx, body.dy, units);
       sendSuccess(res, { position: axi.motion?.getPosition() });
       return;
     }
@@ -384,7 +589,17 @@ async function handleRequest(req, res) {
         sendError(res, 'Missing dx or dy parameters');
         return;
       }
-      await axi.lineTo(body.dx, body.dy, body.units || 'mm');
+      const units = body.units || 'mm';
+      const coalesceMs = parseInt(url.searchParams.get('coalesce') || '0', 10);
+
+      if (coalesceMs > 0) {
+        // Buffer the movement and flush after coalesceMs
+        const position = await addToCoalesceBuffer('lineto', body.dx, body.dy, units, coalesceMs, axi);
+        sendSuccess(res, { buffered: true, position });
+        return;
+      }
+
+      await axi.lineTo(body.dx, body.dy, units);
       sendSuccess(res, { position: axi.motion?.getPosition() });
       return;
     }
@@ -397,6 +612,32 @@ async function handleRequest(req, res) {
       }
       await axi.execute(body.commands);
       sendSuccess(res, { position: axi.motion?.getPosition() });
+      return;
+    }
+
+    if (method === 'POST' && path === '/batch') {
+      const body = await parseBody(req);
+      if (!Array.isArray(body.commands)) {
+        sendError(res, 'Missing commands array');
+        return;
+      }
+
+      const results = [];
+      for (const cmd of body.commands) {
+        if (!cmd.endpoint) {
+          results.push({ error: 'Missing endpoint' });
+          continue;
+        }
+
+        try {
+          const result = await executeBatchCommand(cmd.endpoint, cmd.body || {});
+          results.push({ endpoint: cmd.endpoint, success: true, ...result });
+        } catch (e) {
+          results.push({ endpoint: cmd.endpoint, success: false, error: e.message });
+        }
+      }
+
+      sendSuccess(res, { results, position: axi.motion?.getPosition() });
       return;
     }
 
@@ -542,6 +783,40 @@ async function handleRequest(req, res) {
         job: job.toJSON(),
         commandCount: commands.length,
         bounds: parser.bounds
+      });
+      return;
+    }
+
+    if (method === 'POST' && path === '/svg/upload') {
+      const contentType = req.headers['content-type'] || '';
+      if (!contentType.includes('multipart/form-data')) {
+        sendError(res, 'Expected multipart/form-data');
+        return;
+      }
+
+      const { fields, files } = await parseMultipart(req);
+      const svgFile = files.file || files.svg;
+      if (!svgFile) {
+        sendError(res, 'Missing file field in form data');
+        return;
+      }
+
+      const svgString = svgFile.data.toString('utf8');
+      const options = fields.options ? JSON.parse(fields.options) : {};
+      const parser = new SVGParser(options);
+      const commands = await parser.parse(svgString);
+      const job = queue.add({
+        type: 'commands',
+        data: commands,
+        name: fields.name || svgFile.filename || 'SVG Upload',
+        priority: parseInt(fields.priority || '1', 10),
+        metadata: { svgBounds: parser.bounds, filename: svgFile.filename }
+      });
+      sendSuccess(res, {
+        job: job.toJSON(),
+        commandCount: commands.length,
+        bounds: parser.bounds,
+        filename: svgFile.filename
       });
       return;
     }

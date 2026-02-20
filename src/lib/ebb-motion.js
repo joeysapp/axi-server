@@ -95,6 +95,10 @@ export class EBBMotion {
     this.speedPenUp = options.speedPenUp || 7.5;
     this.acceleration = options.acceleration || 40.0; // in/s^2
 
+    // Minimum movement duration to prevent motor stuttering
+    // Too-short movements cause rapid start/stop cycles that are loud
+    this.minMoveDurationMs = options.minMoveDurationMs || 25;
+
     // Motor state
     this.motorsEnabled = false;
     this.motorResolution = MOTOR_RESOLUTION.DISABLED;
@@ -236,8 +240,12 @@ export class EBBMotion {
       const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
       const distanceInches = this.stepsToInches(distance);
       const speed = this.speedPenUp; // Use pen-up speed for moves
-      duration = Math.max(1, Math.round((distanceInches / speed) * 1000));
+      duration = Math.round((distanceInches / speed) * 1000);
     }
+
+    // Enforce minimum duration to prevent motor stuttering from rapid micro-moves
+    // This gives motors time to accelerate/decelerate smoothly
+    duration = Math.max(this.minMoveDurationMs, duration);
 
     // SM command: SM,duration,axis1(Y),axis2(X)
     await this.ebb.command(`SM,${duration},${deltaY},${deltaX}`);

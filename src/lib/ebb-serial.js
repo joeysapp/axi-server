@@ -29,6 +29,14 @@ export class EBBSerial {
     this.pendingCommand = null;
     this.firmwareVersion = null;
     this.nickname = null;
+
+    // Error recovery
+    this._lastError = null;
+    this._lastErrorTime = 0;
+    this._reconnectBackoffMs = 1000; // Initial backoff
+
+    // Callback for command errors (allows higher layers to reset state)
+    this.onCommandError = options.onCommandError || null;
   }
 
   /**
@@ -82,6 +90,36 @@ export class EBBSerial {
   }
 
   /**
+   * Check if we should wait before reconnecting (backoff)
+   * @returns {number} Milliseconds to wait, or 0 if ready
+   */
+  getReconnectDelay() {
+    if (!this._lastErrorTime) return 0;
+    const elapsed = Date.now() - this._lastErrorTime;
+    const waitTime = this._reconnectBackoffMs - elapsed;
+    return Math.max(0, waitTime);
+  }
+
+  /**
+   * Record an error and increase backoff
+   */
+  _recordError(error) {
+    this._lastError = error;
+    this._lastErrorTime = Date.now();
+    // Exponential backoff up to 10 seconds
+    this._reconnectBackoffMs = Math.min(10000, this._reconnectBackoffMs * 2);
+  }
+
+  /**
+   * Reset error state after successful operation
+   */
+  _clearErrors() {
+    this._lastError = null;
+    this._lastErrorTime = 0;
+    this._reconnectBackoffMs = 1000;
+  }
+
+  /**
    * Connect to the EBB
    * @param {string} portPath - Optional specific port to connect to
    * @returns {Promise<boolean>} Success status
@@ -89,6 +127,13 @@ export class EBBSerial {
   async connect(portPath = null) {
     if (this.connected) {
       return true;
+    }
+
+    // Check backoff
+    const delay = this.getReconnectDelay();
+    if (delay > 0) {
+      console.log(`[Serial] Waiting ${delay}ms before reconnect (backoff)`);
+      await new Promise(r => setTimeout(r, delay));
     }
 
     const targetPort = portPath || this.portPath || await EBBSerial.findPort();
@@ -136,20 +181,24 @@ export class EBBSerial {
           const version = await this.queryVersion();
           if (version && version.startsWith('EBB')) {
             this.firmwareVersion = this._parseVersion(version);
+            this._clearErrors(); // Success - reset backoff
             resolve(true);
           } else {
             // Retry once
             const version2 = await this.queryVersion();
             if (version2 && version2.startsWith('EBB')) {
               this.firmwareVersion = this._parseVersion(version2);
+              this._clearErrors(); // Success - reset backoff
               resolve(true);
             } else {
               await this.disconnect();
+              this._recordError(new Error('Device is not an EiBotBoard'));
               reject(new Error('Device is not an EiBotBoard'));
             }
           }
         } catch (e) {
           await this.disconnect();
+          this._recordError(e);
           reject(e);
         }
       });
@@ -158,11 +207,40 @@ export class EBBSerial {
 
   /**
    * Disconnect from the EBB
+   * @param {boolean} force - Force close even if commands pending
    */
-  async disconnect() {
+  async disconnect(force = false) {
+    // Clear any pending commands to prevent hangs
+    if (this.pendingCommand) {
+      const { reject, timer } = this.pendingCommand;
+      clearTimeout(timer);
+      if (reject) {
+        reject(new Error('Disconnected'));
+      }
+      this.pendingCommand = null;
+    }
+
     if (this.port && this.port.isOpen) {
       return new Promise((resolve) => {
-        this.port.close(() => {
+        const closeTimeout = setTimeout(() => {
+          // Force destroy if close doesn't complete
+          console.log('[Serial] Force destroying port');
+          try {
+            this.port.destroy();
+          } catch (e) {
+            // Ignore
+          }
+          this.connected = false;
+          this.port = null;
+          this.parser = null;
+          resolve();
+        }, 1000);
+
+        this.port.close((err) => {
+          clearTimeout(closeTimeout);
+          if (err) {
+            console.log('[Serial] Close error:', err.message);
+          }
           this.connected = false;
           this.port = null;
           this.parser = null;
@@ -171,6 +249,8 @@ export class EBBSerial {
       });
     }
     this.connected = false;
+    this.port = null;
+    this.parser = null;
   }
 
   /**
@@ -230,7 +310,12 @@ export class EBBSerial {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingCommand = null;
-        reject(new Error(`Command timeout: ${cmd}`));
+        const error = new Error(`Command timeout: ${cmd}`);
+        this._recordError(error);
+        if (this.onCommandError) {
+          this.onCommandError(error, cmd);
+        }
+        reject(error);
       }, this.timeout);
 
       this.pendingCommand = { resolve, reject, timer, expectOK: true, isQuery: false };
@@ -239,7 +324,12 @@ export class EBBSerial {
         if (err) {
           clearTimeout(timer);
           this.pendingCommand = null;
-          reject(new Error(`Write error: ${err.message}`));
+          const error = new Error(`Write error: ${err.message}`);
+          this._recordError(error);
+          if (this.onCommandError) {
+            this.onCommandError(error, cmd);
+          }
+          reject(error);
         }
       });
     });

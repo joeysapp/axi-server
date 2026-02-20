@@ -244,18 +244,17 @@ This implementation directly communicates with the EiBotBoard using the [EBB Com
 
 ### Planned Features
 
+#### Advanced Motion Planning
+- Bezier curve optimization
+- Travel path optimization (TSP)
+- Acceleration/deceleration profiles
+- Constant-speed mode for consistent line weight
+
 #### Generative Art Module
 - Procedural pattern generation (spirals, fractals, flow fields)
 - Parametric shape generators
 - Random seed-based reproducible art
 - Integration with external generative art libraries
-
-#### Agentic LLM Integration
-The `/info` endpoint provides machine-readable documentation designed for LLM consumption. Future enhancements:
-- OpenAPI/Swagger specification generation
-- Example conversation flows for LLM agents
-- Natural language command interpretation endpoint
-- Claude/GPT tool use schemas
 
 #### Webcam Monitoring Service
 - Optional companion service for visual monitoring
@@ -270,18 +269,6 @@ The `/info` endpoint provides machine-readable documentation designed for LLM co
 - Configurable detail levels
 - Direct plotting from images
 
-#### Advanced Motion Planning
-- Bezier curve optimization
-- Travel path optimization (TSP)
-- Acceleration/deceleration profiles
-- Constant-speed mode for consistent line weight
-
-#### Multi-AxiDraw Support
-- Manage multiple connected devices
-- Job routing to specific machines
-- Parallel plotting coordination
-- Device naming and discovery
-
 #### Python Transformers Integration
 - Neural style transfer for drawings
 - AI-generated art pipelines
@@ -293,6 +280,19 @@ The `/info` endpoint provides machine-readable documentation designed for LLM co
 - Queue management UI
 - SVG upload and preview
 - Configuration interface
+
+#### Multi-AxiDraw Support
+- Manage multiple connected devices
+- Job routing to specific machines
+- Parallel plotting coordination
+- Device naming and discovery
+
+#### Agentic LLM Integration
+The `/info` endpoint provides machine-readable documentation designed for LLM consumption. Future enhancements:
+- OpenAPI/Swagger specification generation
+- Example conversation flows for LLM agents
+- Natural language command interpretation endpoint
+- Claude/GPT tool use schemas
 
 ### Ideas for Exploration
 

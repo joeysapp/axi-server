@@ -52,6 +52,10 @@ export class AxiDraw {
     // History tracking
     this.history = [];
     this.maxHistory = options.maxHistory || 1000;
+
+    // Heartbeat for connection monitoring
+    this._heartbeatInterval = null;
+    this._heartbeatMs = options.heartbeatMs || 30000; // 30 seconds default
   }
 
   /**
@@ -83,6 +87,35 @@ export class AxiDraw {
   }
 
   /**
+   * Start heartbeat polling to detect connection drops
+   */
+  _startHeartbeat() {
+    this._stopHeartbeat(); // Clear any existing
+
+    this._heartbeatInterval = setInterval(async () => {
+      if (this.ebb?.connected) {
+        try {
+          await this.ebb.queryGeneral();
+        } catch (e) {
+          console.log('[Heartbeat] Connection lost:', e.message);
+          this._stopHeartbeat();
+          this._setState(AxiDrawState.DISCONNECTED);
+        }
+      }
+    }, this._heartbeatMs);
+  }
+
+  /**
+   * Stop heartbeat polling
+   */
+  _stopHeartbeat() {
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval);
+      this._heartbeatInterval = null;
+    }
+  }
+
+  /**
    * Connect to AxiDraw
    * @param {string} portPath - Optional specific port
    * @returns {Promise<boolean>}
@@ -97,7 +130,15 @@ export class AxiDraw {
       // Create serial connection
       this.ebb = new EBBSerial({
         portPath: portPath || this.portPath,
-        timeout: 5000
+        timeout: 5000,
+        onCommandError: (error, cmd) => {
+          // Reset servo state to unknown on any command error
+          // This prevents stale state causing repeated penUp/penDown calls
+          if (this.servo) {
+            console.log('[AxiDraw] Command error - resetting servo state to unknown');
+            this.servo.isUp = null;
+          }
+        }
       });
 
       await this.ebb.connect(portPath || this.portPath);
@@ -130,6 +171,9 @@ export class AxiDraw {
    * Disconnect from AxiDraw
    */
   async disconnect() {
+    // Stop heartbeat first
+    this._stopHeartbeat();
+
     if (this.ebb) {
       // Try to leave in safe state
       try {
@@ -195,6 +239,9 @@ export class AxiDraw {
         await this.servo.penUp();
       }
 
+      // Start heartbeat monitoring
+      this._startHeartbeat();
+
       this._setState(AxiDrawState.READY);
       this._logAction('initialize');
     } catch (err) {
@@ -206,8 +253,17 @@ export class AxiDraw {
 
   /**
    * Ensure AxiDraw is ready for operation
+   * Handles reconnection if serial connection was lost
    */
   async ensureReady() {
+    // Check if we think we're ready but serial is actually disconnected
+    if ((this.state === AxiDrawState.READY || this.state === AxiDrawState.BUSY) &&
+        (!this.ebb || !this.ebb.connected)) {
+      console.log('[ensureReady] Serial connection lost, resetting state');
+      this._stopHeartbeat();
+      this._setState(AxiDrawState.DISCONNECTED);
+    }
+
     if (this.state === AxiDrawState.READY || this.state === AxiDrawState.BUSY) {
       return; // BUSY is ok - we're in the middle of an operation
     }
