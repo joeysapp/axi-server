@@ -1,0 +1,32 @@
+[Unit]
+Description=AxiDraw HTTP Server
+Documentation=https://github.com/your-repo/axi-server
+After=network.target
+
+[Service]
+Type=simple
+User=zooey
+Group=zooey
+WorkingDirectory=/home/zooey/etc/git/axi-server
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=10
+
+# Environment variables
+Environment=AXIDRAW_PORT=9700
+Environment=AXIDRAW_AUTO_CONNECT=true
+Environment=AXIDRAW_NARROW_BAND=false
+Environment=AXIDRAW_MODEL=V2_V3
+Environment=NODE_ENV=production
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=axidraw-server
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

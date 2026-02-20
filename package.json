@@ -1,0 +1,30 @@
+{
+  "name": "axi-server",
+  "version": "1.0.0",
+  "description": "HTTP REST API server for controlling AxiDraw plotters via direct EBB serial commands",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "bash scripts/test-endpoints.sh"
+  },
+  "keywords": [
+    "axidraw",
+    "plotter",
+    "eibotboard",
+    "ebb",
+    "serial",
+    "rest-api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "serialport": "^12.0.0",
+    "svg-path-parser": "^1.1.0",
+    "svgson": "^5.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
