@@ -9,10 +9,12 @@
 
 import http from 'http';
 import { URL } from 'url';
+import { WebSocketServer } from 'ws';
 import { AxiDraw, AXIDRAW_MODELS, AxiDrawState } from './lib/axidraw.js';
 import { JobQueue, JobState, JobPriority } from './lib/job-queue.js';
 import { SVGParser } from './lib/svg-parser.js';
 import { EBBSerial } from './lib/ebb-serial.js';
+import { SpatialProcessor } from './lib/spatial-processor.js';
 
 // Command coalescing buffers for real-time input smoothing
 // Separate buffers per unit type to avoid conversion issues
@@ -1021,7 +1023,26 @@ const API_DOCS = {
     // SVG
     'POST /svg': 'Parse and queue SVG for drawing - body: { svg: string, name?, options? }',
     'POST /svg/upload': 'Upload SVG file (multipart/form-data) - form field: file',
-    'POST /svg/preview': 'Parse SVG and return commands without drawing - body: { svg: string, options? }'
+    'POST /svg/preview': 'Parse SVG and return commands without drawing - body: { svg: string, options? }',
+
+    // WebSocket
+    'WS /spatial': 'WebSocket for spatial streaming - receives position/velocity state, sends movement commands',
+    'WS /controller': 'WebSocket for raw controller input - receives stick/trigger/button state'
+  },
+  websocketMessages: {
+    // Incoming (from controller)
+    'spatial': '{ type: "spatial", ts, position, velocity, orientation, angular_velocity, linear_accel, buttons }',
+    'state': '{ type: "state", ts, sticks: {lx, ly, rx, ry}, triggers: {l2, r2}, orientation, gyro, accel }',
+    'button': '{ type: "button", button: string, state: "pressed"|"released" }',
+    'event': '{ type: "event", action: "pen_down"|"pen_up"|"stop"|"home" }',
+    'dpad': '{ type: "dpad", direction: "up"|"down"|"left"|"right", state: "pressed"|"released" }',
+    'config': '{ type: "config", config: {...} }',
+    'sync': '{ type: "sync" }',
+    'ping': '{ type: "ping" }',
+    // Outgoing (to controller)
+    'connected': '{ type: "connected", ts, config, position, penDown }',
+    'state_update': '{ type: "state", ts, position, velocity, orientation, angularVelocity, penDown }',
+    'pong': '{ type: "pong", ts }'
   },
   commandTypes: {
     moveTo: '{ type: "moveTo", x: number, y: number, units?: string }',
@@ -1043,6 +1064,15 @@ const API_DOCS = {
     AXIDRAW_MODEL: 'AxiDraw model: V2_V3, V3_A3, V3_XLX, MiniKit, SE_A1, SE_A2',
     AXIDRAW_SPEED_DOWN: 'Pen-down drawing speed in inches/sec (default: 2.5)',
     AXIDRAW_SPEED_UP: 'Pen-up travel speed in inches/sec (default: 7.5)'
+  },
+  spatialProcessing: {
+    tickRate: '120 Hz - fixed update rate for velocity integration',
+    deadzone: '0.08 - input deadzone threshold',
+    velocityCurve: 'cubic - response curve for precise low-speed control',
+    maxLinearSpeed: '200 mm/s - maximum planar velocity',
+    linearDamping: '0.92 - velocity damping per tick',
+    smoothingAlpha: '0.15 - exponential smoothing factor',
+    networkLatency: '15 ms - prediction compensation'
   }
 };
 
@@ -1717,20 +1747,325 @@ CONFIGURATION (Environment Variables)
     text += `${key.padEnd(25)} ${desc}\n`;
   }
 
+  text += `
+WEBSOCKET MESSAGES
+------------------
+`;
+  for (const [type, schema] of Object.entries(docs.websocketMessages)) {
+    text += `${type.padEnd(15)} ${schema}\n`;
+  }
+
+  text += `
+SPATIAL PROCESSING
+------------------
+`;
+  for (const [key, desc] of Object.entries(docs.spatialProcessing)) {
+    text += `${key.padEnd(20)} ${desc}\n`;
+  }
+
   return text;
 }
 
 // Create and start server
 const server = http.createServer(handleRequest);
 
+// ==================== WebSocket Server ====================
+
+// Create WebSocket server attached to HTTP server
+const wss = new WebSocketServer({ server });
+
+// Spatial processor instance (created per connection or shared)
+let spatialProcessor = null;
+
+// Track connected WebSocket clients
+const wsClients = new Set();
+
+/**
+ * Initialize spatial processor with AxiDraw integration
+ */
+function initSpatialProcessor() {
+  if (spatialProcessor) {
+    spatialProcessor.stop();
+  }
+
+  // Get workspace bounds from the AxiDraw model
+  const modelConfig = AXIDRAW_MODELS[MODEL] || AXIDRAW_MODELS.V2_V3;
+
+  spatialProcessor = new SpatialProcessor({
+    // Bounds from AxiDraw model
+    minX: 0,
+    maxX: modelConfig.xTravel,
+    minY: 0,
+    maxY: modelConfig.yTravel,
+
+    // Processing parameters (matching websocket-spatial-streaming.json)
+    deadzone: 0.08,
+    velocityCurve: 'cubic',
+    maxLinearSpeed: 200.0,
+    maxAngularSpeed: 6.0,
+    linearDamping: 0.92,
+    angularDamping: 0.96,
+    smoothingAlpha: 0.15,
+    tickRate: 120,
+    networkLatency: 15,
+    movementThreshold: 0.1,
+
+    // Movement callback - send to AxiDraw
+    onMovement: async (movement) => {
+      if (axi.state !== AxiDrawState.READY && axi.state !== AxiDrawState.BUSY) {
+        return;
+      }
+
+      try {
+        if (movement.penDown) {
+          await axi.lineTo(movement.dx, movement.dy, 'mm');
+        } else {
+          await axi.move(movement.dx, movement.dy, 'mm');
+        }
+      } catch (e) {
+        console.error('[SpatialProcessor] Movement error:', e.message);
+      }
+    },
+
+    // State update callback - broadcast to clients
+    onStateUpdate: (state) => {
+      const message = JSON.stringify({
+        type: 'state',
+        ts: Date.now(),
+        position: state.position,
+        velocity: state.velocity,
+        orientation: state.orientation,
+        angularVelocity: state.angularVelocity,
+        penDown: spatialProcessor.penDown
+      });
+
+      for (const client of wsClients) {
+        if (client.readyState === 1) { // WebSocket.OPEN
+          client.send(message);
+        }
+      }
+    }
+  });
+
+  // Sync initial position from AxiDraw
+  const position = axi.motion?.getPosition();
+  if (position?.mm) {
+    spatialProcessor.syncPosition(position.mm);
+  }
+
+  return spatialProcessor;
+}
+
+/**
+ * Handle WebSocket connection
+ */
+wss.on('connection', (ws, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const path = url.pathname;
+
+  console.log(`[WebSocket] Connection on ${path}`);
+
+  // Only handle /spatial and /controller paths
+  if (path !== '/spatial' && path !== '/controller') {
+    ws.close(4000, 'Invalid path. Use /spatial or /controller');
+    return;
+  }
+
+  wsClients.add(ws);
+
+  // Initialize spatial processor on first connection
+  if (!spatialProcessor) {
+    initSpatialProcessor();
+  }
+
+  // Start processing if not already running
+  if (!spatialProcessor.tickInterval) {
+    spatialProcessor.start();
+  }
+
+  // Send initial state
+  const state = spatialProcessor.getState();
+  ws.send(JSON.stringify({
+    type: 'connected',
+    ts: Date.now(),
+    config: spatialProcessor.getConfig(),
+    position: state.position,
+    penDown: spatialProcessor.penDown
+  }));
+
+  // Handle incoming messages
+  ws.on('message', (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+      handleWebSocketMessage(ws, message, path);
+    } catch (e) {
+      console.error('[WebSocket] Parse error:', e.message);
+      ws.send(JSON.stringify({ type: 'error', error: 'Invalid JSON' }));
+    }
+  });
+
+  // Handle disconnect
+  ws.on('close', () => {
+    console.log('[WebSocket] Client disconnected');
+    wsClients.delete(ws);
+
+    // Stop processor if no clients connected
+    if (wsClients.size === 0 && spatialProcessor) {
+      spatialProcessor.stop();
+    }
+  });
+
+  ws.on('error', (err) => {
+    console.error('[WebSocket] Error:', err.message);
+    wsClients.delete(ws);
+  });
+});
+
+/**
+ * Handle WebSocket message
+ */
+async function handleWebSocketMessage(ws, message, path) {
+  const { type } = message;
+
+  switch (type) {
+    // New spatial streaming format (from websocket-spatial-streaming.json)
+    case 'spatial':
+      spatialProcessor.processSpatialState(message);
+      break;
+
+    // Old raw state format (from websocket-streaming.json)
+    case 'state':
+      spatialProcessor.processRawState(message);
+      break;
+
+    // Button events
+    case 'button':
+      spatialProcessor.handleButtonEvent(message.button, message.state);
+      // Handle AxiDraw-specific button actions
+      if (message.state === 'pressed') {
+        switch (message.button) {
+          case 'cross':
+            await axi.penDown();
+            spatialProcessor.penDown = true;
+            break;
+          case 'circle':
+            await axi.penUp();
+            spatialProcessor.penDown = false;
+            break;
+          case 'triangle':
+            await axi.home();
+            spatialProcessor.handleActionEvent('home');
+            break;
+          case 'options':
+            await axi.emergencyStop();
+            spatialProcessor.handleActionEvent('stop');
+            break;
+        }
+      }
+      break;
+
+    // Action events (from websocket-spatial-streaming.json)
+    case 'event':
+      spatialProcessor.handleActionEvent(message.action);
+      switch (message.action) {
+        case 'pen_down':
+          await axi.penDown();
+          break;
+        case 'pen_up':
+          await axi.penUp();
+          break;
+        case 'stop':
+          await axi.emergencyStop();
+          break;
+        case 'home':
+          await axi.home();
+          break;
+      }
+      break;
+
+    // D-pad events
+    case 'dpad':
+      // D-pad can be used for discrete movements
+      if (message.state === 'pressed') {
+        const step = 5; // mm
+        switch (message.direction) {
+          case 'up':
+            await axi.move(0, -step, 'mm');
+            break;
+          case 'down':
+            await axi.move(0, step, 'mm');
+            break;
+          case 'left':
+            await axi.move(-step, 0, 'mm');
+            break;
+          case 'right':
+            await axi.move(step, 0, 'mm');
+            break;
+        }
+      }
+      break;
+
+    // Motion/orientation events (from old format)
+    case 'motion':
+      // Could be used for tilt-based control in the future
+      break;
+
+    // Touch events
+    case 'touch':
+      // Could be used for touchpad drawing
+      break;
+
+    // System events
+    case 'system':
+      if (message.action === 'pause') {
+        spatialProcessor.stop();
+      }
+      break;
+
+    // Configuration
+    case 'config':
+      spatialProcessor.updateConfig(message.config);
+      ws.send(JSON.stringify({
+        type: 'config_updated',
+        config: spatialProcessor.getConfig()
+      }));
+      break;
+
+    // Sync position from hardware
+    case 'sync':
+      const position = axi.motion?.getPosition();
+      if (position?.mm) {
+        spatialProcessor.syncPosition(position.mm);
+      }
+      ws.send(JSON.stringify({
+        type: 'synced',
+        position: spatialProcessor.getState().position
+      }));
+      break;
+
+    // Ping/pong for keepalive
+    case 'ping':
+      ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+      break;
+
+    default:
+      console.log(`[WebSocket] Unknown message type: ${type}`);
+  }
+}
+
+// ==================== End WebSocket Server ====================
+
 server.listen(PORT, HOST, async () => {
   console.log(`
 ${'='.repeat(50)}
-  AxiDraw HTTP Server
+  AxiDraw HTTP + WebSocket Server
 ${'='.repeat(50)}
-  Listening on: http://${HOST}:${PORT}
+  HTTP:      http://${HOST}:${PORT}
+  WebSocket: ws://${HOST}:${PORT}/spatial
+
   Documentation: http://localhost:${PORT}/
-  Health check: http://localhost:${PORT}/health
+  Health check:  http://localhost:${PORT}/health
+  Web UI:        http://localhost:${PORT}/ui
 ${'='.repeat(50)}
 `);
 

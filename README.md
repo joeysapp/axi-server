@@ -1,16 +1,14 @@
 # AxiDraw HTTP Server
-
 A robust HTTP REST API server for controlling AxiDraw plotters via direct EBB (EiBotBoard) serial commands. Built from scratch with Node.js, eliminating the need for pyaxidraw while providing full control over the hardware.
 
 ## Features
-
-- **Direct EBB Communication**: Raw serial protocol implementation, no Python dependencies
-- **Narrow-Band Servo Support**: Full support for both standard and upgraded brushless lift motors
-- **REST API**: Simple HTTP endpoints for all AxiDraw operations
-- **Job Queue**: Queue multiple drawings with priority support
-- **SVG Support**: Parse and plot SVG files directly
-- **Service Ready**: Includes launchd (macOS) and systemd (Linux) service files
-- **Auto-Discovery**: Automatically finds connected AxiDraw devices
+- Direct EBB Communication: Raw serial protocol implementation, no Python dependencies
+- Narrow-Band Servo Support: Full support for both standard and upgraded brushless lift motors
+- REST API: Simple HTTP endpoints for all AxiDraw operations
+- Job Queue: Queue multiple drawings with priority support
+- SVG Support: Parse and plot SVG files directly
+- Service Ready: Includes launchd (macOS) and systemd (Linux) service files
+- Auto-Discovery: Automatically finds connected AxiDraw devices
 
 ## Quick Start
 
@@ -111,8 +109,8 @@ curl -X POST http://localhost:9700/speed \
 ```
 
 Recommended ranges:
-- **penDown** (drawing): 0.5 - 4.0 in/sec (slower = smoother lines)
-- **penUp** (travel): 3.0 - 10.0 in/sec (faster = less wasted time)
+- penDown (drawing): 0.5 - 4.0 in/sec (slower = smoother lines)
+- penUp (travel): 3.0 - 10.0 in/sec (faster = less wasted time)
 
 ## Installation
 
@@ -137,8 +135,8 @@ The installer will:
 2. Install npm dependencies
 3. Set up serial port permissions (Linux)
 4. Offer service installation options:
-   - **macOS**: launchd daemon or tmux session
-   - **Linux**: systemd service
+   - macOS: launchd daemon or tmux session
+   - Linux: systemd service
 
 ### macOS with tmux (recommended for development)
 
@@ -228,12 +226,12 @@ This implementation directly communicates with the EiBotBoard using the [EBB Com
 
 ### Servo Configurations
 
-**Standard Servo (penlift=2)**
+Standard Servo (penlift=2)
 - Pin: B1
 - Pulse: 0.82-2.32ms
 - Sweep time: 200ms
 
-**Narrow-Band Brushless (penlift=3)**
+Narrow-Band Brushless (penlift=3)
 - Pin: B2
 - Pulse: 0.45-1.05ms
 - Sweep time: 70ms
@@ -296,14 +294,14 @@ The `/info` endpoint provides machine-readable documentation designed for LLM co
 
 ### Ideas for Exploration
 
-1. **HPGL/G-code Import**: Support for legacy plotter formats
-2. **Tiling**: Automatic tiling for plots larger than work area
-3. **Layer Support**: Plot specific SVG layers
-4. **Registration Marks**: Multi-pass alignment
-5. **Pressure Sensitivity**: Variable pen pressure via servo position
-6. **Sound Generation**: Convert audio waveforms to visual plots
-7. **Real-time Plotting**: Stream coordinates as they're generated
-8. **Undo/Resume**: Save plot state for recovery after errors
+1. HPGL/G-code Import: Support for legacy plotter formats
+2. Tiling: Automatic tiling for plots larger than work area
+3. Layer Support: Plot specific SVG layers
+4. Registration Marks: Multi-pass alignment
+5. Pressure Sensitivity: Variable pen pressure via servo position
+6. Sound Generation: Convert audio waveforms to visual plots
+7. Real-time Plotting: Stream coordinates as they're generated
+8. Undo/Resume: Save plot state for recovery after errors
 
 ---
 
