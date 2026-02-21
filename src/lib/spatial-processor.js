@@ -3,9 +3,6 @@
  *
  * Handles velocity integration, smoothing, and spatial state management
  * for real-time controller input processing.
- *
- * Replaces raw stick -> dx/dy mapping with:
- *   stick -> velocity vector -> integrated position -> quantized to mm
  */
 
 /**
@@ -309,32 +306,6 @@ export class SpatialProcessor {
     // Handle button state
     if (buttons !== undefined) {
       this.processButtons(buttons);
-    }
-  }
-
-  /**
-   * Process raw controller state (old format)
-   * @param {object} rawState - Raw controller state
-   */
-  processRawState(rawState) {
-    const { sticks, triggers } = rawState;
-
-    if (sticks) {
-      // Left stick -> planar velocity
-      if (sticks.lx !== undefined && sticks.ly !== undefined) {
-        this.processStickInput(sticks.lx, sticks.ly);
-      }
-      // Right stick -> angular velocity
-      if (sticks.rx !== undefined && sticks.ry !== undefined) {
-        this.processAngularInput(sticks.rx, sticks.ry);
-      }
-    }
-
-    if (triggers) {
-      // R2 trigger -> Z velocity
-      if (triggers.r2 !== undefined) {
-        this.processTriggerInput(triggers.r2);
-      }
     }
   }
 
