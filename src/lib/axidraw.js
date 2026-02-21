@@ -286,10 +286,13 @@ export class AxiDraw {
   async penUp() {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
-    const time = await this.servo.penUp();
-    this._setState(AxiDrawState.READY);
-    this._logAction('pen_up', { time });
-    return time;
+    try {
+      const time = await this.servo.penUp();
+      this._logAction('pen_up', { time });
+      return time;
+    } finally {
+      this._setState(AxiDrawState.READY);
+    }
   }
 
   /**
@@ -298,10 +301,13 @@ export class AxiDraw {
   async penDown() {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
-    const time = await this.servo.penDown();
-    this._setState(AxiDrawState.READY);
-    this._logAction('pen_down', { time });
-    return time;
+    try {
+      const time = await this.servo.penDown();
+      this._logAction('pen_down', { time });
+      return time;
+    } finally {
+      this._setState(AxiDrawState.READY);
+    }
   }
 
   /**
@@ -310,10 +316,13 @@ export class AxiDraw {
   async penToggle() {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
-    const time = await this.servo.toggle();
-    this._setState(AxiDrawState.READY);
-    this._logAction('pen_toggle', { isUp: this.servo.isUp, time });
-    return time;
+    try {
+      const time = await this.servo.toggle();
+      this._logAction('pen_toggle', { isUp: this.servo.isUp, time });
+      return time;
+    } finally {
+      this._setState(AxiDrawState.READY);
+    }
   }
 
   /**
@@ -336,14 +345,17 @@ export class AxiDraw {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
 
-    // Raise pen first
-    if (this.servo.isUp !== true) {
-      await this.servo.penUp();
-    }
+    try {
+      // Raise pen first
+      if (this.servo.isUp !== true) {
+        await this.servo.penUp();
+      }
 
-    await this.motion.home(rate);
-    this._setState(AxiDrawState.READY);
-    this._logAction('home', { rate });
+      await this.motion.home(rate);
+      this._logAction('home', { rate });
+    } finally {
+      this._setState(AxiDrawState.READY);
+    }
   }
 
   /**
@@ -356,30 +368,33 @@ export class AxiDraw {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
 
-    // Raise pen first
-    if (this.servo.isUp !== true) {
-      await this.servo.penUp();
-    }
+    try {
+      // Raise pen first
+      if (this.servo.isUp !== true) {
+        await this.servo.penUp();
+      }
 
-    // Convert to steps
-    let stepsX, stepsY;
-    switch (units) {
-      case 'inches':
-        stepsX = this.motion.inchesToSteps(x);
-        stepsY = this.motion.inchesToSteps(y);
-        break;
-      case 'mm':
-        stepsX = this.motion.mmToSteps(x);
-        stepsY = this.motion.mmToSteps(y);
-        break;
-      default:
-        stepsX = Math.round(x);
-        stepsY = Math.round(y);
-    }
+      // Convert to steps
+      let stepsX, stepsY;
+      switch (units) {
+        case 'inches':
+          stepsX = this.motion.inchesToSteps(x);
+          stepsY = this.motion.inchesToSteps(y);
+          break;
+        case 'mm':
+          stepsX = this.motion.mmToSteps(x);
+          stepsY = this.motion.mmToSteps(y);
+          break;
+        default:
+          stepsX = Math.round(x);
+          stepsY = Math.round(y);
+      }
 
-    await this.motion.moveToAbsolute(stepsX, stepsY);
-    this._setState(AxiDrawState.READY);
-    this._logAction('move_to', { x, y, units });
+      await this.motion.moveToAbsolute(stepsX, stepsY);
+      this._logAction('move_to', { x, y, units });
+    } finally {
+      this._setState(AxiDrawState.READY);
+    }
   }
 
   /**
@@ -387,29 +402,33 @@ export class AxiDraw {
    * @param {number} dx - X delta
    * @param {number} dy - Y delta
    * @param {string} units - 'steps', 'inches', or 'mm' (default: 'mm')
+   * @param {object} options - { skipPenManagement: false }
    */
-  async move(dx, dy, units = 'mm') {
+  async move(dx, dy, units = 'mm', options = {}) {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
 
-    // Raise pen first
-    if (this.servo.isUp !== true) {
-      await this.servo.penUp();
-    }
+    try {
+      // Raise pen first (unless skipPenManagement is true)
+      if (!options.skipPenManagement && this.servo.isUp !== true) {
+        await this.servo.penUp();
+      }
 
-    switch (units) {
-      case 'inches':
-        await this.motion.moveXYInches(dx, dy);
-        break;
-      case 'mm':
-        await this.motion.moveXYMm(dx, dy);
-        break;
-      default:
-        await this.motion.moveXY(dx, dy);
-    }
+      switch (units) {
+        case 'inches':
+          await this.motion.moveXYInches(dx, dy);
+          break;
+        case 'mm':
+          await this.motion.moveXYMm(dx, dy);
+          break;
+        default:
+          await this.motion.moveXY(dx, dy);
+      }
 
-    this._setState(AxiDrawState.READY);
-    this._logAction('move', { dx, dy, units });
+      this._logAction('move', { dx, dy, units });
+    } finally {
+      this._setState(AxiDrawState.READY);
+    }
   }
 
   /**
@@ -417,29 +436,33 @@ export class AxiDraw {
    * @param {number} dx - X delta
    * @param {number} dy - Y delta
    * @param {string} units - 'steps', 'inches', or 'mm' (default: 'mm')
+   * @param {object} options - { skipPenManagement: false }
    */
-  async lineTo(dx, dy, units = 'mm') {
+  async lineTo(dx, dy, units = 'mm', options = {}) {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
 
-    // Lower pen
-    if (this.servo.isUp !== false) {
-      await this.servo.penDown();
-    }
+    try {
+      // Lower pen (unless skipPenManagement is true)
+      if (!options.skipPenManagement && this.servo.isUp !== false) {
+        await this.servo.penDown();
+      }
 
-    switch (units) {
-      case 'inches':
-        await this.motion.moveXYInches(dx, dy, this.motion.speedPenDown);
-        break;
-      case 'mm':
-        await this.motion.moveXYMm(dx, dy, this.motion.speedPenDown * 25.4);
-        break;
-      default:
-        await this.motion.moveXY(dx, dy);
-    }
+      switch (units) {
+        case 'inches':
+          await this.motion.moveXYInches(dx, dy, this.motion.speedPenDown);
+          break;
+        case 'mm':
+          await this.motion.moveXYMm(dx, dy, this.motion.speedPenDown * 25.4);
+          break;
+        default:
+          await this.motion.moveXY(dx, dy);
+      }
 
-    this._setState(AxiDrawState.READY);
-    this._logAction('line_to', { dx, dy, units });
+      this._logAction('line_to', { dx, dy, units });
+    } finally {
+      this._setState(AxiDrawState.READY);
+    }
   }
 
   /**

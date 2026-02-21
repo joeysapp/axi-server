@@ -1797,7 +1797,11 @@ function initSpatialProcessor() {
 		minY: 0,
 		maxY: modelConfig.yTravel,
 
-		// Processing parameters (matching websocket-spatial-streaming.json)
+		// Control mode: 'position' uses pre-integrated position from controller
+		// 'velocity' does local integration (legacy, causes double-integration issues)
+		controlMode: 'position',
+
+		// Processing parameters
 		deadzone: 0.08,
 		velocityCurve: 'cubic',
 		maxLinearSpeed: 200.0,
@@ -1807,22 +1811,34 @@ function initSpatialProcessor() {
 		smoothingAlpha: 0.15,
 		tickRate: 120,
 		networkLatency: 15,
-		movementThreshold: 0.1,
+
+		// Movement batching - larger threshold reduces command frequency
+		movementThreshold: 0.5,  // mm - accumulate until 0.5mm of movement
+
+		// Backpressure - max commands in flight before dropping updates
+		maxPendingCommands: 2,
 
 		// Movement callback - send to AxiDraw
 		onMovement: async (movement) => {
-			if (axi.state !== AxiDrawState.READY && axi.state !== AxiDrawState.BUSY) {
+			// Only proceed if AxiDraw is ready (not busy, not disconnected)
+			if (axi.state !== AxiDrawState.READY) {
+				// Skip this movement - we're busy or disconnected
 				return;
 			}
 
 			try {
+				// Use skipPenManagement since pen state is controlled via button events
+				// (cross = pen_down, circle = pen_up)
+				const options = { skipPenManagement: true };
+
 				if (movement.penDown) {
-					await axi.lineTo(movement.dx, movement.dy, 'mm');
+					await axi.lineTo(movement.dx, movement.dy, 'mm', options);
 				} else {
-					await axi.move(movement.dx, movement.dy, 'mm');
+					await axi.move(movement.dx, movement.dy, 'mm', options);
 				}
 			} catch (e) {
 				console.error('[SpatialProcessor] Movement error:', e.message);
+				// State is already reset by try/finally in move()/lineTo()
 			}
 		},
 

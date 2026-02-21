@@ -64,6 +64,10 @@ export class SpatialState {
 
 /**
  * SpatialProcessor - Processes controller input into smooth spatial state
+ *
+ * Mode of operation:
+ * - "position": Controller sends pre-integrated position, we calculate deltas
+ * - "velocity": Controller sends velocity, we integrate locally (legacy)
  */
 export class SpatialProcessor {
   constructor(options = {}) {
@@ -94,21 +98,33 @@ export class SpatialProcessor {
         maxZ: options.maxZ ?? 100
       },
 
-      // Tick rate
+      // Tick rate (only used in velocity mode)
       tickRate: options.tickRate ?? 120,  // Hz
 
       // Network latency for prediction (ms)
-      networkLatency: options.networkLatency ?? 15
+      networkLatency: options.networkLatency ?? 15,
+
+      // Control mode: "position" or "velocity"
+      controlMode: options.controlMode ?? 'position',
+
+      // Minimum movement threshold before sending command (mm)
+      movementThreshold: options.movementThreshold ?? 0.5,
+
+      // Maximum pending movements before dropping (backpressure)
+      maxPendingCommands: options.maxPendingCommands ?? 3
     };
 
     // Current integrated state
     this.state = new SpatialState();
 
-    // Target velocity (from controller input)
+    // Target velocity (from controller input) - used in velocity mode
     this.targetVelocity = { x: 0, y: 0, z: 0 };
     this.targetAngularVelocity = { x: 0, y: 0, z: 0 };
 
-    // Tick interval
+    // Last received position from controller - used in position mode
+    this.lastReceivedPosition = null;
+
+    // Tick interval (only used in velocity mode)
     this.tickInterval = null;
     this.tickDt = 1000 / this.config.tickRate;  // ms per tick
 
@@ -118,24 +134,35 @@ export class SpatialProcessor {
 
     // Movement accumulator for batching
     this.pendingMovement = { dx: 0, dy: 0 };
-    this.movementThreshold = options.movementThreshold ?? 0.1;  // mm
+    this.movementThreshold = this.config.movementThreshold;
+
+    // Command queue state (for backpressure)
+    this.commandInFlight = false;
+    this.pendingCommands = 0;
+    this.lastCommandTime = 0;
+    this.minCommandInterval = 30; // ms - minimum time between commands
 
     // Pen state
     this.penDown = false;
   }
 
   /**
-   * Start the fixed-rate tick loop
+   * Start the processor
+   * In position mode: no tick loop needed, movements triggered by incoming data
+   * In velocity mode: starts fixed-rate tick loop for integration
    */
   start() {
     if (this.tickInterval) return;
 
-    console.log(`[SpatialProcessor] Starting at ${this.config.tickRate} Hz`);
+    console.log(`[SpatialProcessor] Starting in ${this.config.controlMode} mode`);
     this.state.lastUpdate = Date.now();
 
-    this.tickInterval = setInterval(() => {
-      this.tick();
-    }, this.tickDt);
+    if (this.config.controlMode === 'velocity') {
+      console.log(`[SpatialProcessor] Tick loop at ${this.config.tickRate} Hz`);
+      this.tickInterval = setInterval(() => {
+        this.tick();
+      }, this.tickDt);
+    }
   }
 
   /**
@@ -150,9 +177,12 @@ export class SpatialProcessor {
   }
 
   /**
-   * Process a single tick - integrate velocity into position
+   * Process a single tick - integrate velocity into position (velocity mode only)
    */
   tick() {
+    // Position mode doesn't use tick loop
+    if (this.config.controlMode === 'position') return;
+
     const now = Date.now();
     const dt = (now - this.state.lastUpdate) / 1000;  // seconds
     this.state.lastUpdate = now;
@@ -199,6 +229,11 @@ export class SpatialProcessor {
     this.pendingMovement.dx += dx;
     this.pendingMovement.dy += dy;
 
+    // Apply backpressure
+    if (this.pendingCommands >= this.config.maxPendingCommands) {
+      return;
+    }
+
     // Emit movement if above threshold
     const movementMagnitude = Math.sqrt(
       this.pendingMovement.dx * this.pendingMovement.dx +
@@ -206,13 +241,14 @@ export class SpatialProcessor {
     );
 
     if (movementMagnitude >= this.movementThreshold && this.onMovement) {
-      this.onMovement({
+      const movement = {
         dx: this.pendingMovement.dx,
         dy: this.pendingMovement.dy,
         penDown: this.penDown
-      });
+      };
       this.pendingMovement.dx = 0;
       this.pendingMovement.dy = 0;
+      this.emitMovement(movement);
     }
 
     // Emit state update
@@ -285,9 +321,11 @@ export class SpatialProcessor {
       buttons
     } = spatialData;
 
-    // If controller is sending integrated state, use it directly
-    // but still apply our own smoothing and bounds clamping
-    if (velocity) {
+    if (this.config.controlMode === 'position' && position) {
+      // Position mode: use incoming position directly, calculate deltas
+      this.processPositionMode(position);
+    } else if (velocity) {
+      // Velocity mode: use velocity for local integration
       this.targetVelocity.x = clamp(velocity.x, -this.config.maxLinearSpeed, this.config.maxLinearSpeed);
       this.targetVelocity.y = clamp(velocity.y, -this.config.maxLinearSpeed, this.config.maxLinearSpeed);
       this.targetVelocity.z = clamp(velocity.z ?? 0, -this.config.maxLinearSpeed, this.config.maxLinearSpeed);
@@ -306,6 +344,108 @@ export class SpatialProcessor {
     // Handle button state
     if (buttons !== undefined) {
       this.processButtons(buttons);
+    }
+  }
+
+  /**
+   * Process position mode - use incoming position directly
+   * @param {object} position - Position from controller {x, y, z}
+   */
+  processPositionMode(position) {
+    // Clamp incoming position to workspace bounds
+    const clampedPos = {
+      x: clamp(position.x, this.config.bounds.minX, this.config.bounds.maxX),
+      y: clamp(position.y, this.config.bounds.minY, this.config.bounds.maxY),
+      z: clamp(position.z ?? 0, this.config.bounds.minZ, this.config.bounds.maxZ)
+    };
+
+    // Initialize last position on first message
+    if (this.lastReceivedPosition === null) {
+      this.lastReceivedPosition = { ...clampedPos };
+      this.state.position = { ...clampedPos };
+      console.log(`[SpatialProcessor] Initial position: (${clampedPos.x.toFixed(1)}, ${clampedPos.y.toFixed(1)})`);
+      return;
+    }
+
+    // Calculate delta from last received position
+    const dx = clampedPos.x - this.lastReceivedPosition.x;
+    const dy = clampedPos.y - this.lastReceivedPosition.y;
+
+    // Update last received position
+    this.lastReceivedPosition = { ...clampedPos };
+
+    // Accumulate movement
+    this.pendingMovement.dx += dx;
+    this.pendingMovement.dy += dy;
+
+    // Check movement magnitude
+    const movementMagnitude = Math.sqrt(
+      this.pendingMovement.dx * this.pendingMovement.dx +
+      this.pendingMovement.dy * this.pendingMovement.dy
+    );
+
+    // Apply backpressure - don't emit if too many commands pending
+    if (this.pendingCommands >= this.config.maxPendingCommands) {
+      // Drop this update, keep accumulating
+      return;
+    }
+
+    // Rate limit commands
+    const now = Date.now();
+    if (now - this.lastCommandTime < this.minCommandInterval) {
+      return;
+    }
+
+    // Emit movement if above threshold
+    if (movementMagnitude >= this.movementThreshold && this.onMovement) {
+      this.pendingCommands++;
+      this.lastCommandTime = now;
+
+      // Update our internal state to match
+      this.state.position.x += this.pendingMovement.dx;
+      this.state.position.y += this.pendingMovement.dy;
+
+      const movement = {
+        dx: this.pendingMovement.dx,
+        dy: this.pendingMovement.dy,
+        penDown: this.penDown
+      };
+
+      // Clear pending
+      this.pendingMovement.dx = 0;
+      this.pendingMovement.dy = 0;
+
+      // Emit with completion callback for backpressure tracking
+      this.emitMovement(movement);
+    }
+  }
+
+  /**
+   * Emit movement with backpressure tracking
+   */
+  emitMovement(movement) {
+    if (!this.onMovement) return;
+
+    // Wrap callback to track completion
+    const originalCallback = this.onMovement;
+    const self = this;
+
+    // Call the movement handler
+    const result = originalCallback(movement);
+
+    // If it returns a promise, track completion
+    if (result && typeof result.then === 'function') {
+      result
+        .then(() => {
+          self.pendingCommands = Math.max(0, self.pendingCommands - 1);
+        })
+        .catch((err) => {
+          self.pendingCommands = Math.max(0, self.pendingCommands - 1);
+          // Error already logged by caller
+        });
+    } else {
+      // Synchronous completion
+      this.pendingCommands = Math.max(0, this.pendingCommands - 1);
     }
   }
 
@@ -423,7 +563,24 @@ export class SpatialProcessor {
     this.targetVelocity = { x: 0, y: 0, z: 0 };
     this.targetAngularVelocity = { x: 0, y: 0, z: 0 };
     this.pendingMovement = { dx: 0, dy: 0 };
+    this.lastReceivedPosition = null;
+    this.pendingCommands = 0;
+    this.lastCommandTime = 0;
     this.penDown = false;
+  }
+
+  /**
+   * Get diagnostics for debugging
+   */
+  getDiagnostics() {
+    return {
+      mode: this.config.controlMode,
+      pendingCommands: this.pendingCommands,
+      pendingMovement: { ...this.pendingMovement },
+      lastReceivedPosition: this.lastReceivedPosition ? { ...this.lastReceivedPosition } : null,
+      currentPosition: { ...this.state.position },
+      penDown: this.penDown
+    };
   }
 }
 
