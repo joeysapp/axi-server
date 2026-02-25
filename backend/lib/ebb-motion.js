@@ -91,8 +91,8 @@ export class EBBMotion {
     this.maxY = Math.round(this.model.yTravel * this.stepsPerInch);
 
     // Speed settings (in/s)
-    this.speedPenDown = options.speedPenDown || 2.5; // inches per second
-    this.speedPenUp = options.speedPenUp || 7.5;
+    this.speedPenDown = options.speedPenDown || 0.25; // inches per second
+    this.speedPenUp = options.speedPenUp || 0.5;
     this.acceleration = options.acceleration || 40.0; // in/s^2
 
     // Minimum movement duration in ms. EBB supports down to 2ms.
@@ -181,7 +181,7 @@ export class EBBMotion {
     await this.ebb.command(`HM,${rate}`);
 
     // Wait for movement to complete using proper idle detection
-    await this.ebb.waitForIdle(timeMs + 5000, 50);
+    await this.ebb.waitForIdle(timeMs + 100, 50);
 
     this.posX = 0;
     this.posY = 0;
@@ -240,8 +240,7 @@ export class EBBMotion {
       duration = Math.round((distanceInches / speed) * 1000);
     }
 
-    // Enforce minimum duration to prevent motor stuttering from rapid micro-moves
-    // This gives motors time to accelerate/decelerate smoothly
+   // Enforce minimum duration to prevent overloading EBB is firmware >3.0
     duration = Math.max(this.minMoveDurationMs, duration);
 
     // Enforce maximum EBB step rate limit (25,000 steps/sec per motor)

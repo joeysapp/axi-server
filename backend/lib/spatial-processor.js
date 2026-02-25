@@ -118,7 +118,7 @@ export class SpatialProcessor {
 
     // Movement accumulator for batching
     this.pendingMovement = { dx: 0, dy: 0 };
-    this.movementThreshold = options.movementThreshold ?? 0.1;  // mm
+    this.movementThreshold = options.movementThreshold ?? 0.1;  // mm - this can probably be lowered
     this.isMoving = false;
 
     // Pen state
@@ -214,7 +214,7 @@ export class SpatialProcessor {
       this.isMoving = true;
       const dx = this.pendingMovement.dx;
      const dy = this.pendingMovement.dy;
-	 // Minimum duration is 2 ms for continuous motion with the EBB
+	 // Minimum duration of a command is 2 ms for continuous motion with the EBB
      const duration = Math.max(2, Math.round(this.pendingMovement.dt * 1000));
       const penDown = this.penDown;
       

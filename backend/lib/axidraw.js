@@ -21,12 +21,6 @@ export const AxiDrawState = {
   ERROR: 'error'
 };
 
-async function awaitDebug(d = 100) {
- return new Promise((resolve) => {
-  setTimeout(() => resolve(), d);
- });
-}
-
 /**
  * AxiDraw - Main controller class
  */
@@ -37,11 +31,11 @@ export class AxiDraw {
     this.modelKey = options.model || 'V2_V3';
     this.model = AXIDRAW_MODELS[this.modelKey] || AXIDRAW_MODELS.V2_V3;
     this.resolution = options.resolution || 1; // 1 = high, 2 = low
-    this.narrowBand = options.narrowBand || false; // Use narrow-band servo
+   this.narrowBand = options.narrowBand === true ? true : false; // Use narrow-band servo
 
     // Speed settings (inches per second)
-    this.speedPenDown = options.speedPenDown || 2.5;
-    this.speedPenUp = options.speedPenUp || 7.5;
+    this.speedPenDown = options.speedPenDown || 0.25;
+    this.speedPenUp = options.speedPenUp || 0.50;
 
     // State
     this.state = AxiDrawState.DISCONNECTED;
@@ -58,7 +52,7 @@ export class AxiDraw {
     // History tracking
     this.history = [];
     this.pathHistory = [];
-    this.maxHistory = options.maxHistory || 1000;
+    this.maxHistory = options.maxHistory || 5000;
 
     // Heartbeat for connection monitoring
     this._heartbeatInterval = null;
@@ -169,19 +163,13 @@ export class AxiDraw {
       });
 
      await this.ebb.connect(portPath || this.portPath);
-	 if (process.env.AXIDRAW_DEBUG) {
-	  await awaitDebug();
-	 }
 
-      // Create servo controller
+     // Create servo controller
       this.servo = new EBBServo(this.ebb, {
         narrowBand: this.narrowBand
       });
-	 if (process.env.AXIDRAW_DEBUG) {
-	  await awaitDebug();
-	 }	 
 
-      // Create motion controller
+     // Create motion controller
       this.motion = new EBBMotion(this.ebb, {
         model: this.model,
         resolution: this.resolution,
@@ -258,7 +246,7 @@ export class AxiDraw {
         try {
           const maxFifo = await this.ebb.query('QU,2');
           console.log(`[Init] maxFifo raw response: ${maxFifo}`);
-          const maxFifoSize = parseInt(maxFifo, 10);
+         const maxFifoSize = parseInt(maxFifo, 10);
           if (!isNaN(maxFifoSize) && maxFifoSize > 1) {
             await this.ebb.command(`CU,4,${maxFifoSize}`);
             console.log(`[Init] FIFO size increased to ${maxFifoSize}`);
@@ -351,7 +339,8 @@ export class AxiDraw {
     return time;
   }
 
-  /**
+ /**
+  * [TODO] There's some weird behavior this causes on the frontend. Debug
    * Toggle pen state
    */
   async penToggle() {
@@ -379,7 +368,7 @@ export class AxiDraw {
    * Move to home position (0, 0)
    * @param {number} rate - Movement rate (steps/sec)
    */
-  async home(rate = 3200) {
+  async home(rate = 2032) {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
 

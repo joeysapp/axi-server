@@ -103,8 +103,8 @@ const MODEL = process.env.AXIDRAW_MODEL || 'V2_V3';
 
 // Speed configuration (inches per second)
 // Lowered defaults to prevent loud stepper chatter since XM uses constant velocity (no accel planner)
-const SPEED_PEN_DOWN = parseFloat(process.env.AXIDRAW_SPEED_DOWN || '1.5');
-const SPEED_PEN_UP = parseFloat(process.env.AXIDRAW_SPEED_UP || '3.0');
+const SPEED_PEN_DOWN = parseFloat(process.env.AXIDRAW_SPEED_DOWN || '0.3');
+const SPEED_PEN_UP = parseFloat(process.env.AXIDRAW_SPEED_UP || '0.6');
 
 // Create AxiDraw instance
 const axi = new AxiDraw({
@@ -168,9 +168,9 @@ queue.processor = async (job, updateProgress) => {
 
 // API Documentation
 const API_DOCS = {
-	name: 'AxiDraw HTTP API',
+	name: 'AxiDraw',
 	version: '1.0.0',
-	description: 'REST API for controlling AxiDraw plotters via direct EBB serial commands',
+ description: 'Control Dashboard for AxiDraw plotters',
 	baseUrl: `http://localhost:${PORT}`,
 	endpoints: {
 		// Web UI
