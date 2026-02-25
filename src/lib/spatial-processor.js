@@ -344,6 +344,9 @@ export class SpatialProcessor {
       case 'pen_up':
         this.penDown = false;
         break;
+      case 'pen_toggle':
+        this.penDown = !this.penDown;
+        break;
       case 'stop':
         this.stop();
         this.targetVelocity = { x: 0, y: 0, z: 0 };

@@ -9,7 +9,7 @@
 
 import http from 'http';
 import { URL } from 'url';
-import { WebSocketServer } from 'ws';
+import { setupWebSocketServer } from './api/websocket.js';
 import { AxiDraw, AXIDRAW_MODELS, AxiDrawState } from './lib/axidraw.js';
 import { JobQueue, JobState, JobPriority } from './lib/job-queue.js';
 import { SVGParser } from './lib/svg-parser.js';
@@ -32,30 +32,38 @@ async function flushCoalesceBuffer(type, axi) {
 	const buffer = coalesceBuffers[type];
 	buffer.timer = null;
 
-	// Process each unit type that has accumulated movement
+	// Capture accumulated movements and pending resolvers synchronously
+	const movements = [];
 	for (const units of ['mm', 'inches', 'steps']) {
 		const { dx, dy } = buffer[units];
 		if (dx !== 0 || dy !== 0) {
-			try {
-				if (type === 'move') {
-					await axi.move(dx, dy, units);
-				} else {
-					await axi.lineTo(dx, dy, units);
-				}
-			} catch (e) {
-				console.error(`[Coalesce] Error flushing ${type} (${units}):`, e.message);
-			}
+			movements.push({ units, dx, dy });
 			buffer[units].dx = 0;
 			buffer[units].dy = 0;
 		}
 	}
 
+	const pending = buffer.pending;
+	buffer.pending = [];
+
+	// Process each unit type that has accumulated movement
+	for (const { units, dx, dy } of movements) {
+		try {
+			if (type === 'move') {
+				await axi.move(dx, dy, units);
+			} else {
+				await axi.lineTo(dx, dy, units);
+			}
+		} catch (e) {
+			console.error(`[Coalesce] Error flushing ${type} (${units}):`, e.message);
+		}
+	}
+
 	// Resolve all pending responses
 	const position = axi.motion?.getPosition();
-	for (const resolve of buffer.pending) {
+	for (const resolve of pending) {
 		resolve(position);
 	}
-	buffer.pending = [];
 }
 
 /**
@@ -89,12 +97,13 @@ const PORT = parseInt(process.env.AXIDRAW_PORT || '9700', 10);
 const HOST = process.env.AXIDRAW_HOST || '0.0.0.0';
 const SERIAL_PORT = process.env.AXIDRAW_SERIAL || null;
 const AUTO_CONNECT = process.env.AXIDRAW_AUTO_CONNECT !== 'false';
-const NARROW_BAND = process.env.AXIDRAW_NARROW_BAND === 'true';
+const NARROW_BAND = process.env.AXIDRAW_NARROW_BAND !== 'false'; // Default to true as requested
 const MODEL = process.env.AXIDRAW_MODEL || 'V2_V3';
 
 // Speed configuration (inches per second)
-const SPEED_PEN_DOWN = parseFloat(process.env.AXIDRAW_SPEED_DOWN || '2.5');
-const SPEED_PEN_UP = parseFloat(process.env.AXIDRAW_SPEED_UP || '7.5');
+// Lowered defaults to prevent loud stepper chatter since XM uses constant velocity (no accel planner)
+const SPEED_PEN_DOWN = parseFloat(process.env.AXIDRAW_SPEED_DOWN || '1.5');
+const SPEED_PEN_UP = parseFloat(process.env.AXIDRAW_SPEED_UP || '3.0');
 
 // Create AxiDraw instance
 const axi = new AxiDraw({
@@ -126,814 +135,10 @@ const svgParser = new SVGParser();
 	* from any static file server, React/Vite app, or CDN - simply update the
 	* API_BASE_URL to point to your AxiDraw server.
 	*/
-const CONTROL_PANEL_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>AxiDraw Control Panel</title>
-  <style>
-    :root {
-      --bg: #1a1a2e;
-      --surface: #16213e;
-      --surface-light: #1f3460;
-      --primary: #e94560;
-      --primary-hover: #ff6b6b;
-      --success: #4ecca3;
-      --warning: #ffc107;
-      --text: #eee;
-      --text-dim: #888;
-      --radius: 8px;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      padding: 16px;
-    }
-
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-    }
-
-    header {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-
-    header h1 {
-      font-size: 1.5rem;
-      font-weight: 600;
-    }
-
-    .status-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      margin-top: 8px;
-      font-size: 0.875rem;
-    }
-
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--text-dim);
-    }
-
-    .status-dot.connected { background: var(--success); }
-    .status-dot.disconnected { background: var(--primary); }
-    .status-dot.busy { background: var(--warning); animation: pulse 1s infinite; }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    .card {
-      background: var(--surface);
-      border-radius: var(--radius);
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-
-    .card h2 {
-      font-size: 0.875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-dim);
-      margin-bottom: 12px;
-    }
-
-    .btn-row {
-      display: flex;
-      gap: 8px;
-    }
-
-    .btn {
-      flex: 1;
-      padding: 12px 16px;
-      border: none;
-      border-radius: var(--radius);
-      background: var(--surface-light);
-      color: var(--text);
-      font-size: 0.9rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s;
-      touch-action: manipulation;
-    }
-
-    .btn:hover { background: #2a4a7f; }
-    .btn:active { transform: scale(0.98); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn.primary { background: var(--primary); }
-    .btn.primary:hover { background: var(--primary-hover); }
-
-    .btn.success { background: var(--success); color: #000; }
-    .btn.success:hover { background: #6eecc3; }
-
-    .btn.warning { background: var(--warning); color: #000; }
-
-    .btn.small {
-      padding: 8px 12px;
-      font-size: 0.8rem;
-    }
-
-    /* D-Pad */
-    .dpad-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .dpad-row {
-      display: flex;
-      gap: 4px;
-    }
-
-    .dpad-btn {
-      width: 64px;
-      height: 64px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-      background: var(--surface-light);
-      border: none;
-      border-radius: var(--radius);
-      color: var(--text);
-      cursor: pointer;
-      transition: all 0.1s;
-      touch-action: manipulation;
-      user-select: none;
-    }
-
-    .dpad-btn:hover { background: #2a4a7f; }
-    .dpad-btn:active { background: var(--primary); transform: scale(0.95); }
-
-    .dpad-btn.home {
-      font-size: 1rem;
-      background: var(--warning);
-      color: #000;
-    }
-
-    .dpad-placeholder {
-      width: 64px;
-      height: 64px;
-    }
-
-    /* Position Display */
-    .position-display {
-      display: flex;
-      justify-content: center;
-      gap: 24px;
-      padding: 16px;
-      background: var(--surface-light);
-      border-radius: var(--radius);
-      font-family: 'SF Mono', Monaco, monospace;
-      font-size: 1.25rem;
-    }
-
-    .position-display .coord {
-      display: flex;
-      align-items: baseline;
-      gap: 4px;
-    }
-
-    .position-display .label {
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-
-    .position-display .value {
-      min-width: 80px;
-      text-align: right;
-    }
-
-    /* Sliders */
-    .slider-group {
-      margin-bottom: 16px;
-    }
-
-    .slider-group:last-child {
-      margin-bottom: 0;
-    }
-
-    .slider-label {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 8px;
-      font-size: 0.875rem;
-    }
-
-    .slider-label .value {
-      color: var(--primary);
-      font-weight: 600;
-    }
-
-    input[type="range"] {
-      width: 100%;
-      height: 8px;
-      border-radius: 4px;
-      background: var(--surface-light);
-      appearance: none;
-      outline: none;
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-      appearance: none;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: var(--primary);
-      cursor: pointer;
-    }
-
-    /* SVG Upload */
-    .upload-zone {
-      border: 2px dashed var(--surface-light);
-      border-radius: var(--radius);
-      padding: 24px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .upload-zone:hover, .upload-zone.dragover {
-      border-color: var(--primary);
-      background: rgba(233, 69, 96, 0.1);
-    }
-
-    .upload-zone input {
-      display: none;
-    }
-
-    .upload-zone .icon {
-      font-size: 2rem;
-      margin-bottom: 8px;
-    }
-
-    .upload-zone p {
-      color: var(--text-dim);
-      font-size: 0.875rem;
-    }
-
-    /* Queue */
-    .queue-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px;
-      background: var(--surface-light);
-      border-radius: var(--radius);
-      margin-bottom: 8px;
-    }
-
-    .queue-item:last-child {
-      margin-bottom: 0;
-    }
-
-    .queue-item .name {
-      font-weight: 500;
-    }
-
-    .queue-item .status {
-      font-size: 0.75rem;
-      padding: 4px 8px;
-      border-radius: 4px;
-      background: var(--surface);
-    }
-
-    .queue-item .status.running {
-      background: var(--success);
-      color: #000;
-    }
-
-    .queue-empty {
-      text-align: center;
-      color: var(--text-dim);
-      padding: 16px;
-    }
-
-    /* Toast notifications */
-    .toast-container {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1000;
-    }
-
-    .toast {
-      background: var(--surface);
-      color: var(--text);
-      padding: 12px 20px;
-      border-radius: var(--radius);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      margin-top: 8px;
-      animation: slideUp 0.3s ease;
-    }
-
-    .toast.error {
-      background: var(--primary);
-    }
-
-    .toast.success {
-      background: var(--success);
-      color: #000;
-    }
-
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Pen indicator */
-    .pen-indicator {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 8px 16px;
-      background: var(--surface-light);
-      border-radius: var(--radius);
-      margin-bottom: 12px;
-    }
-
-    .pen-icon {
-      font-size: 1.25rem;
-      transition: transform 0.3s;
-    }
-
-    .pen-icon.down {
-      transform: translateY(4px);
-      color: var(--success);
-    }
-
-    .pen-icon.up {
-      color: var(--text-dim);
-    }
-
-    /* API Host Config */
-    .api-config {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .api-config input {
-      flex: 1;
-      padding: 8px 12px;
-      border: 1px solid var(--surface-light);
-      border-radius: var(--radius);
-      background: var(--surface-light);
-      color: var(--text);
-      font-size: 0.875rem;
-    }
-
-    .api-config input:focus {
-      outline: none;
-      border-color: var(--primary);
-    }
-
-    /* Note about hosting */
-    .hosting-note {
-      font-size: 0.75rem;
-      color: var(--text-dim);
-      text-align: center;
-      margin-top: 16px;
-      padding: 12px;
-      background: var(--surface);
-      border-radius: var(--radius);
-      line-height: 1.5;
-    }
-
-    .hosting-note code {
-      background: var(--surface-light);
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <header>
-      <h1>AxiDraw Control Panel</h1>
-      <div class="status-bar">
-        <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">Checking...</span>
-      </div>
-    </header>
-
-    <!-- API Configuration -->
-    <div class="card">
-      <h2>API Server</h2>
-      <div class="api-config">
-        <input type="text" id="apiHost" placeholder="http://localhost:9700">
-        <button class="btn small" onclick="updateApiHost()">Set</button>
-      </div>
-      <div class="btn-row">
-        <button class="btn success" id="connectBtn" onclick="connect()">Connect</button>
-        <button class="btn" id="disconnectBtn" onclick="disconnect()">Disconnect</button>
-      </div>
-    </div>
-
-    <!-- Pen Control -->
-    <div class="card">
-      <h2>Pen Control</h2>
-      <div class="pen-indicator">
-        <span class="pen-icon" id="penIcon">&#9999;&#65039;</span>
-        <span id="penStatus">Unknown</span>
-      </div>
-      <div class="btn-row">
-        <button class="btn" onclick="penUp()">Pen Up</button>
-        <button class="btn" onclick="penDown()">Pen Down</button>
-        <button class="btn primary" onclick="penToggle()">Toggle</button>
-      </div>
-    </div>
-
-    <!-- Position & Movement -->
-    <div class="card">
-      <h2>Position</h2>
-      <div class="position-display">
-        <div class="coord">
-          <span class="label">X:</span>
-          <span class="value" id="posX">0.00</span>
-          <span class="label">mm</span>
-        </div>
-        <div class="coord">
-          <span class="label">Y:</span>
-          <span class="value" id="posY">0.00</span>
-          <span class="label">mm</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- D-Pad -->
-    <div class="card">
-      <h2>Movement</h2>
-      <div class="slider-group">
-        <div class="slider-label">
-          <span>Step Size</span>
-          <span class="value"><span id="stepValue">5</span> mm</span>
-        </div>
-        <input type="range" id="stepSize" min="1" max="50" value="5" oninput="updateStep()">
-      </div>
-      <div class="dpad-container">
-        <div class="dpad-row">
-          <div class="dpad-placeholder"></div>
-          <button class="dpad-btn" onpointerdown="move(0, -1)" ontouchstart="move(0, -1)">&#9650;</button>
-          <div class="dpad-placeholder"></div>
-        </div>
-        <div class="dpad-row">
-          <button class="dpad-btn" onpointerdown="move(-1, 0)" ontouchstart="move(-1, 0)">&#9664;</button>
-          <button class="dpad-btn home" onclick="goHome()">HOME</button>
-          <button class="dpad-btn" onpointerdown="move(1, 0)" ontouchstart="move(1, 0)">&#9654;</button>
-        </div>
-        <div class="dpad-row">
-          <div class="dpad-placeholder"></div>
-          <button class="dpad-btn" onpointerdown="move(0, 1)" ontouchstart="move(0, 1)">&#9660;</button>
-          <div class="dpad-placeholder"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Speed Control -->
-    <div class="card">
-      <h2>Speed Settings</h2>
-      <div class="slider-group">
-        <div class="slider-label">
-          <span>Pen Down Speed</span>
-          <span class="value"><span id="speedDownValue">2.5</span> in/s</span>
-        </div>
-        <input type="range" id="speedDown" min="0.5" max="5" step="0.1" value="2.5" oninput="updateSpeedDisplay()">
-      </div>
-      <div class="slider-group">
-        <div class="slider-label">
-          <span>Pen Up Speed</span>
-          <span class="value"><span id="speedUpValue">7.5</span> in/s</span>
-        </div>
-        <input type="range" id="speedUp" min="1" max="15" step="0.5" value="7.5" oninput="updateSpeedDisplay()">
-      </div>
-      <button class="btn" onclick="setSpeed()">Apply Speed</button>
-    </div>
-
-    <!-- SVG Upload -->
-    <div class="card">
-      <h2>SVG Upload</h2>
-      <div class="upload-zone" id="uploadZone" onclick="document.getElementById('svgFile').click()">
-        <input type="file" id="svgFile" accept=".svg,image/svg+xml" onchange="uploadSVG(event)">
-        <div class="icon">&#128196;</div>
-        <p>Click or drag SVG file here</p>
-      </div>
-    </div>
-
-    <!-- Queue -->
-    <div class="card">
-      <h2>Job Queue</h2>
-      <div id="queueList">
-        <div class="queue-empty">No jobs in queue</div>
-      </div>
-      <div class="btn-row" style="margin-top: 12px;">
-        <button class="btn small" onclick="pauseQueue()">Pause</button>
-        <button class="btn small" onclick="resumeQueue()">Resume</button>
-        <button class="btn small warning" onclick="clearQueue()">Clear</button>
-      </div>
-    </div>
-
-    <!-- Emergency Stop -->
-    <div class="card">
-      <button class="btn primary" style="width: 100%; padding: 16px; font-size: 1.1rem;" onclick="emergencyStop()">
-        &#9632; EMERGENCY STOP
-      </button>
-    </div>
-
-    <!-- Hosting Note -->
-    <div class="hosting-note">
-      This UI can be hosted separately from the AxiDraw server.<br>
-      Copy this HTML to any static host, CDN, or embed in a React/Vite app.<br>
-      Just update the API Server URL above to point to your AxiDraw instance.
-    </div>
-  </div>
-
-  <div class="toast-container" id="toasts"></div>
-
-  <script>
-    // Configuration - can be changed to point to any AxiDraw server
-    let API_BASE = '';
-
-    // Initialize API base from current location or localStorage
-    function initApiBase() {
-      const saved = localStorage.getItem('axiApiHost');
-      if (saved) {
-        API_BASE = saved;
-      } else {
-        // Default to same origin
-        API_BASE = window.location.origin;
-      }
-      document.getElementById('apiHost').value = API_BASE;
-    }
-
-    function updateApiHost() {
-      const input = document.getElementById('apiHost').value.trim();
-      API_BASE = input.replace(/\\/$/, ''); // Remove trailing slash
-      localStorage.setItem('axiApiHost', API_BASE);
-      toast('API host updated', 'success');
-      refreshStatus();
-    }
-
-    // Toast notifications
-    function toast(message, type = 'info') {
-      const container = document.getElementById('toasts');
-      const el = document.createElement('div');
-      el.className = 'toast ' + type;
-      el.textContent = message;
-      container.appendChild(el);
-      setTimeout(() => el.remove(), 3000);
-    }
-
-    // API helpers
-    async function api(endpoint, options = {}) {
-      try {
-        const res = await fetch(API_BASE + endpoint, {
-          ...options,
-          headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
-          }
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        return data;
-      } catch (e) {
-        toast(e.message, 'error');
-        throw e;
-      }
-    }
-
-    async function post(endpoint, body = {}) {
-      return api(endpoint, { method: 'POST', body: JSON.stringify(body) });
-    }
-
-    // Status polling
-    let statusInterval;
-
-    async function refreshStatus() {
-      try {
-        const data = await api('/health');
-        const dot = document.getElementById('statusDot');
-        const text = document.getElementById('statusText');
-
-        if (data.connected) {
-          dot.className = 'status-dot connected';
-          text.textContent = 'Connected - ' + (data.state || 'ready');
-        } else {
-          dot.className = 'status-dot disconnected';
-          text.textContent = 'Disconnected';
-        }
-
-        // Update position
-        const status = await api('/status');
-        if (status.motion?.position) {
-          document.getElementById('posX').textContent = status.motion.position.mm.x.toFixed(2);
-          document.getElementById('posY').textContent = status.motion.position.mm.y.toFixed(2);
-        }
-
-        // Update pen status
-        const penIcon = document.getElementById('penIcon');
-        const penStatus = document.getElementById('penStatus');
-        if (status.servo?.isUp !== undefined) {
-          penIcon.className = 'pen-icon ' + (status.servo.isUp ? 'up' : 'down');
-          penStatus.textContent = status.servo.isUp ? 'Up' : 'Down';
-        }
-
-        // Update queue
-        const queue = await api('/queue');
-        updateQueueDisplay(queue);
-
-        // Update speed sliders
-        const speed = await api('/speed');
-        if (speed.speed) {
-          document.getElementById('speedDown').value = speed.speed.penDown;
-          document.getElementById('speedUp').value = speed.speed.penUp;
-          updateSpeedDisplay();
-        }
-      } catch (e) {
-        document.getElementById('statusDot').className = 'status-dot disconnected';
-        document.getElementById('statusText').textContent = 'Server unreachable';
-      }
-    }
-
-    function updateQueueDisplay(data) {
-      const container = document.getElementById('queueList');
-      const jobs = data.jobs || [];
-
-      if (jobs.length === 0) {
-        container.innerHTML = '<div class="queue-empty">No jobs in queue</div>';
-        return;
-      }
-
-      container.innerHTML = jobs.map(job => \`
-        <div class="queue-item">
-          <div>
-            <div class="name">\${job.name || 'Unnamed'}</div>
-            <div style="font-size: 0.75rem; color: var(--text-dim);">\${job.progress || 0}%</div>
-          </div>
-          <span class="status \${job.state === 'running' ? 'running' : ''}">\${job.state}</span>
-        </div>
-      \`).join('');
-    }
-
-    // Connection
-    async function connect() {
-      await post('/connect');
-      toast('Connected!', 'success');
-      refreshStatus();
-    }
-
-    async function disconnect() {
-      await post('/disconnect');
-      toast('Disconnected', 'info');
-      refreshStatus();
-    }
-
-    // Pen control
-    async function penUp() {
-      await post('/pen/up');
-      refreshStatus();
-    }
-
-    async function penDown() {
-      await post('/pen/down');
-      refreshStatus();
-    }
-
-    async function penToggle() {
-      await post('/pen/toggle');
-      refreshStatus();
-    }
-
-    // Movement
-    function getStepSize() {
-      return parseFloat(document.getElementById('stepSize').value);
-    }
-
-    function updateStep() {
-      document.getElementById('stepValue').textContent = getStepSize();
-    }
-
-    async function move(dx, dy) {
-      const step = getStepSize();
-      await post('/move?coalesce=50', { dx: dx * step, dy: dy * step, units: 'mm' });
-      refreshStatus();
-    }
-
-    async function goHome() {
-      await post('/home');
-      toast('Moving home...', 'info');
-      refreshStatus();
-    }
-
-    // Speed
-    function updateSpeedDisplay() {
-      document.getElementById('speedDownValue').textContent = document.getElementById('speedDown').value;
-      document.getElementById('speedUpValue').textContent = document.getElementById('speedUp').value;
-    }
-
-    async function setSpeed() {
-      const penDown = parseFloat(document.getElementById('speedDown').value);
-      const penUp = parseFloat(document.getElementById('speedUp').value);
-      await post('/speed', { penDown, penUp });
-      toast('Speed updated', 'success');
-    }
-
-    // SVG Upload
-    const uploadZone = document.getElementById('uploadZone');
-
-    uploadZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      uploadZone.classList.add('dragover');
-    });
-
-    uploadZone.addEventListener('dragleave', () => {
-      uploadZone.classList.remove('dragover');
-    });
-
-    uploadZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      uploadZone.classList.remove('dragover');
-      const file = e.dataTransfer.files[0];
-      if (file) handleSVGFile(file);
-    });
-
-    function uploadSVG(event) {
-      const file = event.target.files[0];
-      if (file) handleSVGFile(file);
-    }
-
-    async function handleSVGFile(file) {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      try {
-        const res = await fetch(API_BASE + '/svg/upload', {
-          method: 'POST',
-          body: formData
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        toast(\`Queued: \${file.name} (\${data.commandCount} commands)\`, 'success');
-        refreshStatus();
-      } catch (e) {
-        toast(e.message, 'error');
-      }
-    }
-
-    // Queue controls
-    async function pauseQueue() {
-      await post('/queue/pause');
-      toast('Queue paused', 'info');
-    }
-
-    async function resumeQueue() {
-      await post('/queue/resume');
-      toast('Queue resumed', 'success');
-    }
-
-    async function clearQueue() {
-      await post('/queue/clear');
-      toast('Queue cleared', 'info');
-      refreshStatus();
-    }
-
-    // Emergency stop
-    async function emergencyStop() {
-      await post('/stop');
-      toast('EMERGENCY STOP', 'error');
-      refreshStatus();
-    }
-
-    // Initialize
-    initApiBase();
-    refreshStatus();
-    statusInterval = setInterval(refreshStatus, 2000);
-  </script>
-</body>
-</html>
-`;
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Set up job processor
 queue.processor = async (job, updateProgress) => {
@@ -1263,7 +468,7 @@ async function handleRequest(req, res) {
 				'Content-Type': 'text/html',
 				'Access-Control-Allow-Origin': '*'
 			});
-			res.end(CONTROL_PANEL_HTML);
+			res.end(fs.readFileSync(new URL('./public/index.html', import.meta.url), 'utf8'));
 			return;
 		}
 
@@ -1284,7 +489,7 @@ async function handleRequest(req, res) {
 		}
 
 		if (method === 'GET' && path === '/health') {
-			const status = await axi.getStatus();
+			const status = await axi.getStatus(false);
 			sendJSON(res, {
 				ok: status.connected,
 				state: status.state,
@@ -1297,7 +502,8 @@ async function handleRequest(req, res) {
 		}
 
 		if (method === 'GET' && path === '/status') {
-			const status = await axi.getStatus();
+			const queryHardware = url.searchParams.get('hardware') === 'true';
+			const status = await axi.getStatus(queryHardware);
 			sendJSON(res, status);
 			return;
 		}
@@ -1696,6 +902,36 @@ async function handleRequest(req, res) {
 			return;
 		}
 
+		// ==================== Path State ====================
+		if (method === 'GET' && path === '/path') {
+			const history = axi.pathHistory || [];
+			let svgPath = '';
+			for (const point of history) {
+				if (point.action === 'pen_up' || point.action === 'pen_down') continue;
+				const cmd = point.penDown ? 'L' : 'M';
+				svgPath += `${cmd} ${point.x.toFixed(2)} ${point.y.toFixed(2)} `;
+			}
+
+			const bounds = axi.motion?.getStatus()?.bounds?.mm || { maxX: 300, maxY: 218 };
+
+			const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${bounds.maxX} ${bounds.maxY}" width="100%" height="100%">
+  <path d="${svgPath.trim()}" fill="none" stroke="#000000" stroke-width="0.5" stroke-linejoin="round" stroke-linecap="round" />
+</svg>`;
+
+			sendJSON(res, {
+				path: history,
+				svg,
+				bounds
+			});
+			return;
+		}
+
+		if (method === 'POST' && path === '/path/clear') {
+			axi.clearPathHistory?.();
+			sendSuccess(res, { message: 'Path history cleared' });
+			return;
+		}
+
 		// 404 - Not found
 		sendError(res, `Unknown endpoint: ${method} ${path}`, 404);
 
@@ -1768,285 +1004,7 @@ SPATIAL PROCESSING
 // Create and start server
 const server = http.createServer(handleRequest);
 
-// ==================== WebSocket Server ====================
-
-// Create WebSocket server attached to HTTP server
-const wss = new WebSocketServer({ server });
-
-// Spatial processor instance (created per connection or shared)
-let spatialProcessor = null;
-
-// Track connected WebSocket clients
-const wsClients = new Set();
-
-/**
-	* Initialize spatial processor with AxiDraw integration
-	*/
-function initSpatialProcessor() {
-	if (spatialProcessor) {
-		spatialProcessor.stop();
-	}
-
-	// Get workspace bounds from the AxiDraw model
-	const modelConfig = AXIDRAW_MODELS[MODEL] || AXIDRAW_MODELS.V2_V3;
-
-	spatialProcessor = new SpatialProcessor({
-		// Bounds from AxiDraw model
-		minX: 0,
-		maxX: modelConfig.xTravel,
-		minY: 0,
-		maxY: modelConfig.yTravel,
-
-		// Processing parameters (matching websocket-spatial-streaming.json)
-		deadzone: 0.08,
-		velocityCurve: 'cubic',
-		maxLinearSpeed: 200.0,
-		maxAngularSpeed: 6.0,
-		linearDamping: 0.92,
-		angularDamping: 0.96,
-		smoothingAlpha: 0.15,
-		tickRate: 120,
-		networkLatency: 15,
-		movementThreshold: 0.1,
-
-		// Movement callback - send to AxiDraw
-		onMovement: async (movement) => {
-			if (axi.state !== AxiDrawState.READY && axi.state !== AxiDrawState.BUSY) {
-				return;
-			}
-
-			try {
-				if (movement.penDown) {
-					await axi.lineTo(movement.dx, movement.dy, 'mm');
-				} else {
-					await axi.move(movement.dx, movement.dy, 'mm');
-				}
-			} catch (e) {
-				console.error('[SpatialProcessor] Movement error:', e.message);
-			}
-		},
-
-		// State update callback - broadcast to clients (todo)
-		onStateUpdate: (state) => {
-			const message = JSON.stringify({
-				type: 'state',
-				ts: Date.now(),
-				position: state.position,
-				velocity: state.velocity,
-				orientation: state.orientation,
-				angularVelocity: state.angularVelocity,
-				penDown: spatialProcessor.penDown
-			});
-
-			for (const client of wsClients) {
-				if (client.readyState === 1) { // WebSocket.OPEN
-					client.send(message);
-				}
-			}
-		}
-	});
-
-	// Sync initial position from AxiDraw
-	const position = axi.motion?.getPosition();
-	if (position?.mm) {
-		spatialProcessor.syncPosition(position.mm);
-	}
-
-	return spatialProcessor;
-}
-
-/**
-	* Handle WebSocket connection
-	*/
-wss.on('connection', (ws, req) => {
-	const url = new URL(req.url, `http://${req.headers.host}`);
-	const path = url.pathname;
-
-	console.log(`[WebSocket] Connection on ${path}`);
-
-	if (path !== '/spatial') {
-		ws.close(4000, 'Invalid path. Use /spatial');
-		return;
-	}
-
-	wsClients.add(ws);
-
-	// Initialize spatial processor on first connection
-	if (!spatialProcessor) {
-		initSpatialProcessor();
-	}
-
-	// Start processing if not already running
-	if (!spatialProcessor.tickInterval) {
-		spatialProcessor.start();
-	}
-
-	// Send initial state
-	const state = spatialProcessor.getState();
-	ws.send(JSON.stringify({
-		type: 'connected',
-		ts: Date.now(),
-		config: spatialProcessor.getConfig(),
-		position: state.position,
-		penDown: spatialProcessor.penDown
-	}));
-
-	// Handle incoming messages
-	ws.on('message', (data) => {
-		try {
-			const message = JSON.parse(data.toString());
-			handleWebSocketMessage(ws, message, path);
-		} catch (e) {
-			console.error('[WebSocket] Parse error:', e.message);
-			ws.send(JSON.stringify({ type: 'error', error: 'Invalid JSON' }));
-		}
-	});
-
-	// Handle disconnect
-	ws.on('close', () => {
-		console.log('[WebSocket] Client disconnected');
-		wsClients.delete(ws);
-
-		// Stop processor if no clients connected
-		if (wsClients.size === 0 && spatialProcessor) {
-			spatialProcessor.stop();
-		}
-	});
-
-	ws.on('error', (err) => {
-		console.error('[WebSocket] Error:', err.message);
-		wsClients.delete(ws);
-	});
-});
-
-/**
-	* Handle WebSocket message
-	*/
-async function handleWebSocketMessage(ws, message, path) {
-	const { type } = message;
-
-	switch (type) {
-		// New spatial streaming format (from websocket-spatial-streaming.json)
-		case 'spatial':
-			spatialProcessor.processSpatialState(message);
-			break;
-
-		// Button events
-		case 'button':
-			spatialProcessor.handleButtonEvent(message.button, message.state);
-			// Handle AxiDraw-specific button actions
-			if (message.state === 'pressed') {
-				switch (message.button) {
-					case 'cross':
-						await axi.penDown();
-						spatialProcessor.penDown = true;
-						break;
-					case 'circle':
-						await axi.penUp();
-						spatialProcessor.penDown = false;
-						break;
-					case 'triangle':
-						await axi.home();
-						spatialProcessor.handleActionEvent('home');
-						break;
-					case 'options':
-						await axi.emergencyStop();
-						spatialProcessor.handleActionEvent('stop');
-						break;
-				}
-			}
-			break;
-
-		// Action events (from websocket-spatial-streaming.json)
-		case 'event':
-			spatialProcessor.handleActionEvent(message.action);
-			switch (message.action) {
-				case 'pen_down':
-					await axi.penDown();
-					break;
-				case 'pen_up':
-					await axi.penUp();
-					break;
-				case 'stop':
-					await axi.emergencyStop();
-					break;
-				case 'home':
-					await axi.home();
-					break;
-			}
-			break;
-
-		// D-pad events
-		case 'dpad':
-			// D-pad can be used for discrete movements
-			if (message.state === 'pressed') {
-				const step = 5; // mm
-				switch (message.direction) {
-					case 'up':
-						await axi.move(0, -step, 'mm');
-						break;
-					case 'down':
-						await axi.move(0, step, 'mm');
-						break;
-					case 'left':
-						await axi.move(-step, 0, 'mm');
-						break;
-					case 'right':
-						await axi.move(step, 0, 'mm');
-						break;
-				}
-			}
-			break;
-
-		// Motion/orientation events (from old format)
-		case 'motion':
-			// Could be used for tilt-based control in the future
-			break;
-
-		// Touch events
-		case 'touch':
-			// Could be used for touchpad drawing
-			break;
-
-		// System events
-		case 'system':
-			if (message.action === 'pause') {
-				spatialProcessor.stop();
-			}
-			break;
-
-		// Configuration
-		case 'config':
-			spatialProcessor.updateConfig(message.config);
-			ws.send(JSON.stringify({
-				type: 'config_updated',
-				config: spatialProcessor.getConfig()
-			}));
-			break;
-
-		// Sync position from hardware
-		case 'sync':
-			const position = axi.motion?.getPosition();
-			if (position?.mm) {
-				spatialProcessor.syncPosition(position.mm);
-			}
-			ws.send(JSON.stringify({
-				type: 'synced',
-				position: spatialProcessor.getState().position
-			}));
-			break;
-
-		// Ping/pong for keepalive
-		case 'ping':
-			ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
-			break;
-
-		default:
-			console.log(`[WebSocket] Unknown message type: ${type}`);
-	}
-}
-
-// ==================== End WebSocket Server ====================
+setupWebSocketServer(server, axi, { MODEL });
 
 server.listen(PORT, HOST, async () => {
 	console.log(`

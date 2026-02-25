@@ -257,68 +257,105 @@ export class EBBSerial {
    * Handle incoming serial data
    */
   _handleResponse(data) {
-    if (this.pendingCommand) {
-      const { resolve, reject, timer, expectOK, isQuery } = this.pendingCommand;
-      clearTimeout(timer);
+    if (!this.pendingCommand) {
+      return;
+    }
 
-      // Check for error response
-      if (data.startsWith('Err:')) {
-        this.pendingCommand = null;
-        reject(new Error(`EBB Error: ${data}`));
+    const { resolve, reject, timer, expectOK, isQuery, needsOK, cmd } = this.pendingCommand;
+
+    // Check for error response (!xx Err: or Err:)
+    if (data.includes('Err:') || data.startsWith('!')) {
+      clearTimeout(timer);
+      this.pendingCommand = null;
+      const error = new Error(`EBB Error: ${data} (Command: ${cmd})`);
+      this._recordError(error);
+      if (this.onCommandError) {
+        this.onCommandError(error, cmd);
+      }
+      reject(error);
+      return;
+    }
+
+    // For queries, we get data first, then potentially OK
+    if (isQuery) {
+      if (data === 'OK') {
+        if (needsOK && this.pendingCommand.responseData !== undefined) {
+          clearTimeout(timer);
+          const res = this.pendingCommand.responseData;
+          this.pendingCommand = null;
+          resolve(res);
+        } else if (!needsOK) {
+          // Received unexpected OK, ignore
+        } else {
+          // Got OK before data? Resolve with empty string.
+          clearTimeout(timer);
+          this.pendingCommand = null;
+          resolve('');
+        }
         return;
       }
 
-      // For queries, we get data first, then OK
-      if (isQuery) {
-        if (data === 'OK') {
-          // This is the trailing OK after query response, ignore
-          return;
-        }
+      if (needsOK) {
+        this.pendingCommand.responseData = data;
+      } else {
+        clearTimeout(timer);
         this.pendingCommand = null;
         resolve(data);
-        return;
       }
-
-      // For commands expecting OK
-      if (expectOK) {
-        if (data.startsWith('OK')) {
-          this.pendingCommand = null;
-          resolve(data);
-        } else {
-          // Might be additional data, wait for OK
-          this.responseQueue.push(data);
-        }
-        return;
-      }
-
-      // Default: resolve with whatever we got
-      this.pendingCommand = null;
-      resolve(data);
+      return;
     }
+
+    // For commands expecting OK
+    if (expectOK) {
+      if (data.startsWith('OK')) {
+        clearTimeout(timer);
+        this.pendingCommand = null;
+        resolve(data);
+      } else {
+        // Might be additional data, wait for OK
+        this.responseQueue.push(data);
+      }
+      return;
+    }
+
+    // Default
+    clearTimeout(timer);
+    this.pendingCommand = null;
+    resolve(data);
   }
 
-  /**
-   * Send a command and wait for OK response
-   * @param {string} cmd - Command string (without \r)
-   * @returns {Promise<string>} Response
-   */
-  async command(cmd) {
-    if (!this.connected || !this.port) {
-      throw new Error('Not connected to EBB');
+  async _processQueue() {
+    if (this.isProcessingQueue || !this.commandQueue || this.commandQueue.length === 0) return;
+    this.isProcessingQueue = true;
+
+    while (this.commandQueue.length > 0) {
+      const task = this.commandQueue[0];
+      try {
+        const result = await this._executeCommand(task);
+        task.resolve(result);
+      } catch (err) {
+        task.reject(err);
+      }
+      this.commandQueue.shift();
     }
 
+    this.isProcessingQueue = false;
+  }
+
+  async _executeCommand(task) {
+    const { cmd, timeout, isQuery, needsOK } = task;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingCommand = null;
-        const error = new Error(`Command timeout: ${cmd}`);
+        const error = new Error(`Command timeout: ${cmd} (${timeout}ms)`);
         this._recordError(error);
         if (this.onCommandError) {
           this.onCommandError(error, cmd);
         }
         reject(error);
-      }, this.timeout);
+      }, timeout);
 
-      this.pendingCommand = { resolve, reject, timer, expectOK: true, isQuery: false };
+      this.pendingCommand = { resolve, reject, timer, expectOK: !isQuery, isQuery, needsOK, cmd };
 
       this.port.write(`${cmd}\r`, 'ascii', (err) => {
         if (err) {
@@ -336,14 +373,43 @@ export class EBBSerial {
   }
 
   /**
-   * Send a query and get response data
-   * @param {string} cmd - Query command (without \r)
-   * @returns {Promise<string>} Response data
+   * Send a command and wait for OK response
+   * @param {string} cmd - Command string (without \r)
+   * @param {number} timeoutOverride - Optional timeout override in ms
+   * @returns {Promise<string>} Response
    */
-  async query(cmd) {
+  async command(cmd, timeoutOverride = null) {
     if (!this.connected || !this.port) {
       throw new Error('Not connected to EBB');
     }
+
+    if (!this.commandQueue) this.commandQueue = [];
+
+    return new Promise((resolve, reject) => {
+      this.commandQueue.push({ 
+        cmd, 
+        timeout: timeoutOverride || this.timeout, 
+        isQuery: false, 
+        needsOK: true, 
+        resolve, 
+        reject 
+      });
+      this._processQueue();
+    });
+  }
+
+  /**
+   * Send a query and get response data
+   * @param {string} cmd - Query command (without \r)
+   * @param {number} timeoutOverride - Optional timeout override in ms
+   * @returns {Promise<string>} Response data
+   */
+  async query(cmd, timeoutOverride = null) {
+    if (!this.connected || !this.port) {
+      throw new Error('Not connected to EBB');
+    }
+
+    if (!this.commandQueue) this.commandQueue = [];
 
     // Commands that don't return trailing OK
     const noOKCommands = ['A', 'I', 'MR', 'PI', 'QM', 'QG', 'V'];
@@ -351,20 +417,15 @@ export class EBBSerial {
     const needsOK = !noOKCommands.includes(cmdBase);
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingCommand = null;
-        reject(new Error(`Query timeout: ${cmd}`));
-      }, this.timeout);
-
-      this.pendingCommand = { resolve, reject, timer, expectOK: false, isQuery: true };
-
-      this.port.write(`${cmd}\r`, 'ascii', (err) => {
-        if (err) {
-          clearTimeout(timer);
-          this.pendingCommand = null;
-          reject(new Error(`Write error: ${err.message}`));
-        }
+      this.commandQueue.push({ 
+        cmd, 
+        timeout: timeoutOverride || this.timeout, 
+        isQuery: true, 
+        needsOK, 
+        resolve, 
+        reject 
       });
+      this._processQueue();
     });
   }
 

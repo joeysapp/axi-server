@@ -56,7 +56,7 @@ test_endpoint() {
     local response
     response=$(eval "$curl_cmd" 2>/dev/null) || {
         echo -e "  ${RED}FAILED: Connection error${NC}"
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
         return 1
     }
 
@@ -64,20 +64,20 @@ test_endpoint() {
     if [[ -n "$expected" ]]; then
         if echo "$response" | grep -q "$expected"; then
             echo -e "  ${GREEN}PASSED${NC}"
-            ((PASSED++))
+            PASSED=$((PASSED + 1))
         else
             echo -e "  ${RED}FAILED: Expected '$expected'${NC}"
             echo -e "  Response: $response"
-            ((FAILED++))
+            FAILED=$((FAILED + 1))
         fi
     else
         # Just check for valid JSON or any response
         if [[ -n "$response" ]]; then
             echo -e "  ${GREEN}PASSED${NC} (got response)"
-            ((PASSED++))
+            PASSED=$((PASSED + 1))
         else
             echo -e "  ${RED}FAILED: Empty response${NC}"
-            ((FAILED++))
+            FAILED=$((FAILED + 1))
         fi
     fi
 }
@@ -88,7 +88,7 @@ skip_test() {
     local reason="$3"
 
     echo -e "${YELLOW}Skipping: ${NC}$method $path - $reason"
-    ((SKIPPED++))
+    SKIPPED=$((SKIPPED + 1))
 }
 
 # Check if server is running
@@ -111,7 +111,7 @@ header "Status & Info Endpoints"
 ###############################################################################
 
 test_endpoint "GET" "/" "" "AxiDraw HTTP API" "API documentation"
-test_endpoint "GET" "/info" "" '"name":"AxiDraw HTTP API"' "JSON documentation"
+test_endpoint "GET" "/info" "" '"name": "AxiDraw HTTP API"' "JSON documentation"
 test_endpoint "GET" "/health" "" '"ok"' "Health check"
 test_endpoint "GET" "/status" "" '"state"' "Detailed status"
 test_endpoint "GET" "/history" "" '"history"' "Action history"
@@ -154,21 +154,21 @@ if [[ -n "$IS_CONNECTED" ]]; then
     echo ""
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        test_endpoint "POST" "/pen/up" "" '"success":true' "Pen up"
+        test_endpoint "POST" "/pen/up" "" '"success": true' "Pen up"
         sleep 1
-        test_endpoint "POST" "/pen/down" "" '"success":true' "Pen down"
+        test_endpoint "POST" "/pen/down" "" '"success": true' "Pen down"
         sleep 1
-        test_endpoint "POST" "/pen/up" "" '"success":true' "Pen up (return)"
-        test_endpoint "POST" "/pen/toggle" "" '"success":true' "Pen toggle"
+        test_endpoint "POST" "/pen/up" "" '"success": true' "Pen up (return)"
+        test_endpoint "POST" "/pen/toggle" "" '"success": true' "Pen toggle"
         sleep 1
-        test_endpoint "POST" "/pen/toggle" "" '"success":true' "Pen toggle (return)"
+        test_endpoint "POST" "/pen/toggle" "" '"success": true' "Pen toggle (return)"
     else
         skip_test "POST" "/pen/up" "User skipped"
         skip_test "POST" "/pen/down" "User skipped"
         skip_test "POST" "/pen/toggle" "User skipped"
     fi
 
-    test_endpoint "POST" "/pen/config" '{"posUp":65,"posDown":35}' '"success":true' "Pen config"
+    test_endpoint "POST" "/pen/config" '{"posUp":65,"posDown":35}' '"success": true' "Pen config"
 else
     skip_test "GET" "/pen/status" "Not connected"
     skip_test "POST" "/pen/up" "Not connected"
@@ -188,13 +188,13 @@ if [[ -n "$IS_CONNECTED" ]]; then
     echo ""
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        test_endpoint "POST" "/move" '{"dx":10,"dy":0}' '"success":true' "Move relative +10mm X"
+        test_endpoint "POST" "/move" '{"dx":10,"dy":0}' '"success": true' "Move relative +10mm X"
         sleep 1
-        test_endpoint "POST" "/move" '{"dx":-10,"dy":0}' '"success":true' "Move relative -10mm X"
+        test_endpoint "POST" "/move" '{"dx":-10,"dy":0}' '"success": true' "Move relative -10mm X"
         sleep 1
-        test_endpoint "POST" "/moveto" '{"x":20,"y":20}' '"success":true' "Move to 20,20mm"
+        test_endpoint "POST" "/moveto" '{"x":20,"y":20}' '"success": true' "Move to 20,20mm"
         sleep 1
-        test_endpoint "POST" "/home" '{}' '"success":true' "Home"
+        test_endpoint "POST" "/home" '{}' '"success": true' "Home"
     else
         skip_test "POST" "/move" "User skipped"
         skip_test "POST" "/moveto" "User skipped"
@@ -212,9 +212,9 @@ header "Speed Configuration Endpoints"
 ###############################################################################
 
 test_endpoint "GET" "/speed" "" '"speed"' "Get speed settings"
-test_endpoint "POST" "/speed" '{"penDown":2.0,"penUp":6.0}' '"success":true' "Set speeds"
+test_endpoint "POST" "/speed" '{"penDown":2.0,"penUp":6.0}' '"success": true' "Set speeds"
 # Reset to defaults
-test_endpoint "POST" "/speed" '{"penDown":2.5,"penUp":7.5}' '"success":true' "Reset speeds"
+test_endpoint "POST" "/speed" '{"penDown":2.5,"penUp":7.5}' '"success": true' "Reset speeds"
 
 ###############################################################################
 header "Motor Control Endpoints"
@@ -222,7 +222,7 @@ header "Motor Control Endpoints"
 
 if [[ -n "$IS_CONNECTED" ]]; then
     # These are safe to call
-    test_endpoint "POST" "/motors/on" "" '"success":true' "Motors on"
+    test_endpoint "POST" "/motors/on" "" '"success": true' "Motors on"
     # Don't turn off motors during test as it would mess up position
     skip_test "POST" "/motors/off" "Would disable motors"
     skip_test "POST" "/stop" "Emergency stop - skip in tests"
@@ -243,9 +243,9 @@ test_endpoint "GET" "/queue/history" "" '"history"' "Get queue history"
 TEST_JOB='{"type":"commands","data":[{"type":"penUp"}],"name":"Test Job"}'
 QUEUE_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d "$TEST_JOB" "$BASE_URL/queue")
 
-if echo "$QUEUE_RESPONSE" | grep -q '"success":true'; then
+if echo "$QUEUE_RESPONSE" | grep -q '"success": true'; then
     echo -e "  ${GREEN}PASSED${NC} POST /queue (Add job)"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 
     # Extract job ID
     JOB_ID=$(echo "$QUEUE_RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -256,19 +256,19 @@ if echo "$QUEUE_RESPONSE" | grep -q '"success":true'; then
     fi
 else
     echo -e "  ${RED}FAILED${NC} POST /queue"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 fi
 
-test_endpoint "POST" "/queue/pause" "" '"success":true' "Pause queue"
-test_endpoint "POST" "/queue/resume" "" '"success":true' "Resume queue"
-test_endpoint "POST" "/queue/clear" "" '"success":true' "Clear queue"
+test_endpoint "POST" "/queue/pause" "" '"success": true' "Pause queue"
+test_endpoint "POST" "/queue/resume" "" '"success": true' "Resume queue"
+test_endpoint "POST" "/queue/clear" "" '"success": true' "Clear queue"
 
 ###############################################################################
 header "SVG Endpoints"
 ###############################################################################
 
 # Test SVG preview (doesn't require connection)
-TEST_SVG='<svg><line x1="0" y1="0" x2="100" y2="100"/></svg>'
+TEST_SVG='<svg><line x1=\"0\" y1=\"0\" x2=\"100\" y2=\"100\"/></svg>'
 test_endpoint "POST" "/svg/preview" "{\"svg\":\"$TEST_SVG\"}" '"commands"' "SVG preview"
 
 # Test SVG queue
@@ -276,9 +276,9 @@ SVG_QUEUE_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" \
     -d "{\"svg\":\"$TEST_SVG\",\"name\":\"Test SVG\"}" \
     "$BASE_URL/svg")
 
-if echo "$SVG_QUEUE_RESPONSE" | grep -q '"success":true'; then
+if echo "$SVG_QUEUE_RESPONSE" | grep -q '"success": true'; then
     echo -e "  ${GREEN}PASSED${NC} POST /svg (Queue SVG)"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 
     # Cancel the SVG job
     JOB_ID=$(echo "$SVG_QUEUE_RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -288,7 +288,7 @@ if echo "$SVG_QUEUE_RESPONSE" | grep -q '"success":true'; then
 else
     echo -e "  ${RED}FAILED${NC} POST /svg"
     echo "  Response: $SVG_QUEUE_RESPONSE"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 fi
 
 ###############################################################################
@@ -298,7 +298,7 @@ header "Execute Command Endpoint"
 # Test execute endpoint (structure only, won't move if not connected)
 EXEC_CMD='{"commands":[{"type":"penUp"}]}'
 if [[ -n "$IS_CONNECTED" ]]; then
-    test_endpoint "POST" "/execute" "$EXEC_CMD" '"success":true' "Execute commands"
+    test_endpoint "POST" "/execute" "$EXEC_CMD" '"success": true' "Execute commands"
 else
     skip_test "POST" "/execute" "Not connected"
 fi
@@ -314,10 +314,10 @@ test_endpoint "GET" "/nonexistent" "" '"error"' "404 Not Found"
 BAD_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d '{invalid}' "$BASE_URL/queue" 2>/dev/null)
 if echo "$BAD_RESPONSE" | grep -q '"error"'; then
     echo -e "  ${GREEN}PASSED${NC} Invalid JSON handling"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 else
     echo -e "  ${RED}FAILED${NC} Invalid JSON handling"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 fi
 
 # Test missing parameters

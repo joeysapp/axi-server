@@ -51,6 +51,7 @@ export class AxiDraw {
 
     // History tracking
     this.history = [];
+    this.pathHistory = [];
     this.maxHistory = options.maxHistory || 1000;
 
     // Heartbeat for connection monitoring
@@ -71,6 +72,26 @@ export class AxiDraw {
     if (this.history.length > this.maxHistory) {
       this.history.shift();
     }
+
+    // Path tracking for SVG shape creation
+    const movementActions = ['home', 'move_to', 'move', 'line_to', 'pen_up', 'pen_down', 'pen_toggle'];
+    if (movementActions.includes(action) && this.motion && this.servo) {
+      const pos = this.motion.getPosition().mm;
+      this.pathHistory.push({
+        action,
+        x: pos.x,
+        y: pos.y,
+        penDown: this.servo.isUp === false,
+        time: Date.now()
+      });
+    }
+  }
+
+  /**
+   * Clear path history
+   */
+  clearPathHistory() {
+    this.pathHistory = [];
   }
 
   /**
@@ -220,6 +241,19 @@ export class AxiDraw {
       try {
         await this.ebb.clearSteps();
         console.log('[Init] Steps cleared');
+        
+        // Optimize FIFO buffer for smooth movements
+        try {
+          const maxFifo = await this.ebb.query('QU,2');
+          console.log(`[Init] maxFifo raw response: ${maxFifo}`);
+          const maxFifoSize = parseInt(maxFifo, 10);
+          if (!isNaN(maxFifoSize) && maxFifoSize > 1) {
+            await this.ebb.command(`CU,4,${maxFifoSize}`);
+            console.log(`[Init] FIFO size increased to ${maxFifoSize}`);
+          }
+        } catch (e) {
+          console.log('[Init] FIFO optimization not supported on this firmware version');
+        }
       } catch (e) {
         console.log('[Init] CS command failed:', e.message);
       }
@@ -524,7 +558,7 @@ export class AxiDraw {
    * Get comprehensive status
    * @returns {Object} Status information
    */
-  async getStatus() {
+  async getStatus(queryHardware = true) {
     const status = {
       state: this.state,
       error: this.error,
@@ -541,40 +575,44 @@ export class AxiDraw {
       if (this.motion) {
         status.motion = this.motion.getStatus();
 
-        // Query actual position from EBB
-        try {
-          const pos = await this.motion.queryPosition();
-          status.motion.actualPosition = pos;
-        } catch (e) {
-          // Ignore query errors
+        if (queryHardware) {
+          // Query actual position from EBB
+          try {
+            const pos = await this.motion.queryPosition();
+            status.motion.actualPosition = pos;
+          } catch (e) {
+            // Ignore query errors
+          }
         }
       }
 
-      // Query general status
-      try {
-        const qg = await this.ebb.queryGeneral();
-        status.hardware = {
-          penUp: !!(qg & 0x02),
-          commandExecuting: !!(qg & 0x04),
-          motor1Moving: !!(qg & 0x08),
-          motor2Moving: !!(qg & 0x10),
-          fifoEmpty: !!(qg & 0x20),
-          buttonPressed: !!(qg & 0x01)
-        };
-      } catch (e) {
-        // Ignore query errors
-      }
+      if (queryHardware) {
+        // Query general status
+        try {
+          const qg = await this.ebb.queryGeneral();
+          status.hardware = {
+            penUp: !!(qg & 0x02),
+            commandExecuting: !!(qg & 0x04),
+            motor1Moving: !!(qg & 0x08),
+            motor2Moving: !!(qg & 0x10),
+            fifoEmpty: !!(qg & 0x20),
+            buttonPressed: !!(qg & 0x01)
+          };
+        } catch (e) {
+          // Ignore query errors
+        }
 
-      // Query voltage
-      try {
-        const voltage = await this.ebb.queryVoltage();
-        status.power = {
-          current: voltage.current,
-          voltage: voltage.voltage,
-          voltageLow: voltage.voltage < 250
-        };
-      } catch (e) {
-        // Ignore query errors
+        // Query voltage
+        try {
+          const voltage = await this.ebb.queryVoltage();
+          status.power = {
+            current: voltage.current,
+            voltage: voltage.voltage,
+            voltageLow: voltage.voltage < 250
+          };
+        } catch (e) {
+          // Ignore query errors
+        }
       }
     }
 

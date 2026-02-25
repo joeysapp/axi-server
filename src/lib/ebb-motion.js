@@ -95,9 +95,9 @@ export class EBBMotion {
     this.speedPenUp = options.speedPenUp || 7.5;
     this.acceleration = options.acceleration || 40.0; // in/s^2
 
-    // Minimum movement duration to prevent motor stuttering
-    // Too-short movements cause rapid start/stop cycles that are loud
-    this.minMoveDurationMs = options.minMoveDurationMs || 25;
+    // Minimum movement duration in ms. EBB supports down to 1ms.
+    // Set to 1ms to allow rapid processing of tiny line segments from SVG arcs.
+    this.minMoveDurationMs = options.minMoveDurationMs || 1;
 
     // Motor state
     this.motorsEnabled = false;
@@ -193,25 +193,16 @@ export class EBBMotion {
    * @param {number} y - Target Y in steps
    * @param {number} rate - Step frequency (2-25000 steps/sec)
    */
-  async moveToAbsolute(x, y, rate = 3200) {
+  async moveToAbsolute(x, y, rate = null) {
     // Clamp to bounds
     x = Math.max(0, Math.min(this.maxX, Math.round(x)));
     y = Math.max(0, Math.min(this.maxY, Math.round(y)));
 
-    // Calculate approximate time based on distance and rate
     const dx = x - this.posX;
     const dy = y - this.posY;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const timeMs = Math.max(100, Math.round((distance / rate) * 1000));
-
-    // HM command with position
-    await this.ebb.command(`HM,${rate},${y},${x}`);
-
-    // Wait for movement to complete using proper idle detection
-    await this.ebb.waitForIdle(timeMs + 5000, 50);
-
-    this.posX = x;
-    this.posY = y;
+    
+    // CoreXY relies on mixed-axis moves, so delegate to the moveXY method
+    await this.moveXY(dx, dy, null);
   }
 
   /**
@@ -231,6 +222,12 @@ export class EBBMotion {
     deltaX = Math.round(deltaX);
     deltaY = Math.round(deltaY);
 
+    // Prevent out-of-bounds movement
+    const targetX = Math.max(0, Math.min(this.maxX, this.posX + deltaX));
+    const targetY = Math.max(0, Math.min(this.maxY, this.posY + deltaY));
+    deltaX = targetX - this.posX;
+    deltaY = targetY - this.posY;
+
     if (deltaX === 0 && deltaY === 0) {
       return;
     }
@@ -247,20 +244,13 @@ export class EBBMotion {
     // This gives motors time to accelerate/decelerate smoothly
     duration = Math.max(this.minMoveDurationMs, duration);
 
-    // SM command: SM,duration,axis1(Y),axis2(X)
-    await this.ebb.command(`SM,${duration},${deltaY},${deltaX}`);
-
-    // CRITICAL: Wait for the movement to complete before sending next command
-    // Use proper motor idle detection to prevent overload
-    await this.ebb.waitForIdle(duration + 5000, 50);
+    // XM command: XM,duration,axisA,axisB
+    // For AxiDraw (CoreXY): XM handles the conversion to Motor1 & Motor2 internally
+    await this.ebb.command(`XM,${duration},${deltaX},${deltaY}`, duration + 5000);
 
     // Update position
     this.posX += deltaX;
     this.posY += deltaY;
-
-    // Clamp to bounds
-    this.posX = Math.max(0, Math.min(this.maxX, this.posX));
-    this.posY = Math.max(0, Math.min(this.maxY, this.posY));
   }
 
   /**

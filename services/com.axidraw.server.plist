@@ -19,9 +19,9 @@
         <key>AXIDRAW_AUTO_CONNECT</key>
         <string>true</string>
         <key>AXIDRAW_NARROW_BAND</key>
-        <string>false</string>
+        <string>true</string>
         <key>AXIDRAW_MODEL</key>
-        <string>V2_V3</string>
+        <string>SE_A3</string>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
