@@ -39,10 +39,15 @@ export function setupWebSocketServer(server, axi, config) {
 			maxAngularSpeed: 6.0,
 			linearDamping: 0.92,
 			angularDamping: 0.96,
-			smoothingAlpha: 0.15,
-			tickRate: 120,
-			networkLatency: 15,
-			movementThreshold: 0.1,
+		 smoothingAlpha: 0.15,
+		 // Did not work:
+		 // tickRate: 240,
+		 tickRate: 120,		 
+		 networkLatency: 15,
+		 // We accumulate momvemnts until we have over half of a mm..
+		 // .. so this slightly reduces the sound, but it does reduce responsiveness too..
+		 // movementThreshold:0.20,		 
+		 movementThreshold: 0.1,
 
 			// Movement callback - send to AxiDraw
 			onMovement: async (movement) => {
@@ -51,10 +56,15 @@ export function setupWebSocketServer(server, axi, config) {
 				}
 
 				try {
+					let duration = 0;
 					if (movement.penDown) {
-						await axi.lineTo(movement.dx, movement.dy, 'mm');
+						duration = await axi.lineTo(movement.dx, movement.dy, 'mm');
 					} else {
-						await axi.move(movement.dx, movement.dy, 'mm');
+						duration = await axi.move(movement.dx, movement.dy, 'mm');
+					}
+
+					if (duration > 0) {
+						await new Promise(resolve => setTimeout(resolve, duration));
 					}
 				} catch (e) {
 					console.error('[SpatialProcessor] Movement error:', e.message);
@@ -211,6 +221,27 @@ export function setupWebSocketServer(server, axi, config) {
 						break;
 					case 'home':
 						await axi.home();
+						break;
+					case 'version':
+						const version = await axi.getVersion();
+						ws.send(JSON.stringify({
+							type: 'version',
+							version,
+						}));
+						break;
+
+					case 'nickname':
+						const nickname = await axi.getNickname();
+						ws.send(JSON.stringify({
+							type: 'nickname',
+							nickname,
+						}));
+						break;
+					case 'reset':
+						await axi.reset();
+						break;
+					case 'reboot':
+						await axi.reboot();
 						break;
 				}
 				break;

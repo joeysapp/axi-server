@@ -1,8 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="us-EN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+   <meta name="robots" content="noindex,nofollow" />
+   <meta http-equiv="x-dns-prefetch-control" content="off" />
+   <link rel="icon" href="public/favicon.png"/>
   <title>AxiDraw Control Panel</title>
   <style>
     :root {
@@ -415,16 +418,33 @@
       padding: 2px 6px;
       border-radius: 4px;
     }
+
+   .d-flex {
+	display: flex;
+      gap: 4px;
+   }
+   .flex-col {
+	display: flex;
+	flex-direction: column;
+      gap: 4px;
+   }
   </style>
 </head>
 <body>
   <div class="container">
    <header style="display: flex; justify-content: space-between; align-items: center;">
-     <h1 style="font-family: monospace;">axi-core</h1>
+    <h1 style="font-family: monospace;">axi-core</h1>
+	<div style="display: flex; flex-direction: column; justify-content: space-between; align-items: left;">
       <div class="status-bar">
-        <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">Checking...</span>
+        <span class="status-dot" id="serverStatusDot"></span>
+        <span id="serverStatusText">Checking...</span>
       </div>
+	
+      <div class="status-bar">
+        <span class="status-dot" id="axiStatusDot"></span>
+        <span id="axiStatusText">Checking...</span>
+      </div>
+	 </div>
     </header>
 
     <!-- Position & Canvas -->
@@ -446,7 +466,8 @@
     </div>
     <!-- Pen Control -->
     <div class="card" style="padding: 12px; margin-bottom: 12px;">
-      <h2 style="margin-bottom: 8px;">Controls</h2>
+     <h2 style="margin-bottom: 8px;">Controls</h2>
+	 <div style="display: flex; justify-content: space-around;">
           <div class="dpad-container" style="gap: 2px;">
             <div class="dpad-row" style="gap: 2px;">
               <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(-1, -1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8598;</button>
@@ -468,6 +489,14 @@
               <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(1, 1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8600;</button>
             </div>
           </div>
+	 <div class="d-flex flex-col">
+ <button class="btn small" id="connectBtn" onclick="connect()">Connect</button>
+ <button class="btn small" onclick="reset()">Reset</button> 
+ <button class="btn small" onclick="reboot()">Reboot</button>
+ <button class="btn primary small" onclick="emergencyStop()">Stop</button>
+ <button class="btn primary small" id="disconnectBtn" onclick="disconnect()">Disconnect</button>  
+</div>
+</div>
     </div>
 
     <!-- SVG Upload & Queue -->
@@ -486,7 +515,6 @@
             <button class="btn small" onclick="pauseQueue()">Pause</button>
             <button class="btn small" onclick="resumeQueue()">Resume</button>
            <button class="btn small warning" onclick="clearQueue()">Clear</button>
-          <button class="btn primary small" onclick="emergencyStop()">STOP</button>		   
           </div>
         </div>
       </div>
@@ -532,9 +560,7 @@
       <div class="api-config" style="display: flex; flex-direction: column; margin-bottom: 0;">
        <input type="text" id="apiHost" placeholder="http://localhost:9700" style="padding: 6px 10px;">
 		<div class="display: flex; justify-content: space-between;">
-        <button class="btn small" id="connectBtn" onclick="connect()">Connect</button>
-         <button class="btn primary small" id="disconnectBtn" onclick="disconnect()">Disconnect</button>
-         <button class="btn success small" onclick="updateApiHost()">Save to Browser</button>
+         <button class="btn success small" onclick="updateApiHost()">Save AxiDraw Host to Browser</button>
 		 </div>
       </div>
     </div>
@@ -599,25 +625,30 @@
 
     async function post(endpoint, body = {}) {
       return api(endpoint, { method: 'POST', body: JSON.stringify(body) });
-    }
+      }	  
 
     // WebSocket Connection
     let ws;
     function connectWebSocket() {
       const wsUrl = API_BASE.replace(/^http/, 'ws') + '/spatial';
       ws = new WebSocket(wsUrl);
-      
+      function onUnload() {
+	 window.removeEventListener("beforeunload", onUnload);
+		ws.close();
+	};
       ws.onopen = () => {
-        const dot = document.getElementById('statusDot');
-        const text = document.getElementById('statusText');
+        const dot = document.getElementById('serverStatusDot');
+        const text = document.getElementById('serverStatusText');
         dot.className = 'status-dot connected';
         text.textContent = 'Connected (WS)';
+	   window.addEventListener("beforeunload", onUnload);
+
       };
       
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'state' || data.type === 'connected') {
+         const data = JSON.parse(event.data);
+         if (data.type === 'state' || data.type === 'connected') {
             if (data.position && data.position.x !== undefined) {
               document.getElementById('posX').textContent = data.position.x.toFixed(2);
               document.getElementById('posY').textContent = data.position.y.toFixed(2);
@@ -629,35 +660,51 @@
              penButton.className = 'dpad-btn ' + (data.penDown ? 'primary' : 'warning');			 
               penIcon.className = 'pen-icon ' + (data.penDown ? 'down' : 'up');
              penStatus.textContent = data.penDown ? 'Pen Down' : 'Pen Up';
-             penStatus.className = data.penDown ? 'primary' : '';			 
+             penStatus.className = data.penDown ? 'primary' : '';
             }
           }
         } catch(e) {}
       };
       
       ws.onclose = () => {
-        setTimeout(connectWebSocket, 3000);
+        const dot = document.getElementById('serverStatusDot');
+        const text = document.getElementById('serverStatusText');
+        dot.className = 'status-dot disconnected';
+        text.textContent = 'Disconnected (WS)';	   
+       // setTimeout(connectWebSocket, 3000);
       };
     }
 
     // Status polling
     let statusInterval;
+let canvasInterval;
+let status
+async function refreshCanvas() {
+
+        // Update canvas
+        try {
+          const pathRes = await api('/path');
+          updateCanvas(pathRes.path, pathRes.bounds, status?.motion?.position?.mm);
+        } catch (e) {
+          // ignore canvas update errors
+        }
+}
 
     async function refreshStatus() {
       try {
-        const data = await api('/health');
-        const dot = document.getElementById('statusDot');
-        const text = document.getElementById('statusText');
-
-        if (data.connected && (!ws || ws.readyState !== WebSocket.OPEN)) {
+       const data = await api('/health');
+        const dot = document.getElementById('axiStatusDot');
+       const text = document.getElementById('axiStatusText');
+	   // console.log(data);
+        if (data.connected && (!ws || ws.readyState === WebSocket.OPEN)) {
           dot.className = 'status-dot connected';
-          text.textContent = 'Connected - ' + (data.state || 'ready');
+          text.textContent = 'Axi ' + (data.state || 'Connected');
         } else if (!data.connected) {
           dot.className = 'status-dot disconnected';
-          text.textContent = 'Disconnected';
+          text.textContent = 'Axi Disconnected';
         }
 
-        const status = await api('/status');
+       status = await api('/status');
 
         // Update queue
         const queue = await api('/queue');
@@ -674,17 +721,12 @@
           }
           updateSpeedDisplay();
         }
-
-        // Update canvas
-        try {
-          const pathRes = await api('/path');
-          updateCanvas(pathRes.path, pathRes.bounds, status.motion?.position?.mm);
-        } catch (e) {
-          // ignore canvas update errors
-        }
       } catch (e) {
-        document.getElementById('statusDot').className = 'status-dot disconnected';
-        document.getElementById('statusText').textContent = 'Server unreachable';
+	   console.error(e);
+        document.getElementById('serverStatusDot').className = 'status-dot disconnected';
+       document.getElementById('serverStatusText').textContent = 'Server unreachable';
+       // document.getElementById('axiStatusDot').className = 'status-dot unknown';
+       // document.getElementById('axiStatusText').textContent = 'AxiDraw unknown';	   
       }
     }
 
@@ -777,7 +819,7 @@
 
     // Connection
     async function connect() {
-      await post('/connect');
+     await post('/connect');	 
       toast('Connected!', 'success');
       refreshStatus();
     }
@@ -825,8 +867,10 @@
       document.getElementById('stepValue').textContent = getStepSize();
     }
 
+let moving;
     function startMove(dx, dy) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
+     if (ws && ws.readyState === WebSocket.OPEN) {
+	  moving = true;
         // Base speed based on step size slider (1-50 -> 10-200 mm/s approx)
         const speed = (getStepSize() / 50) * 200;
         ws.send(JSON.stringify({
@@ -842,7 +886,8 @@
     }
 
     function stopMove() {
-      if (ws && ws.readyState === WebSocket.OPEN) {
+     if (moving && ws && ws.readyState === WebSocket.OPEN) {
+	 moving = false;	  
         ws.send(JSON.stringify({
           type: 'spatial',
           ts: Date.now(),
@@ -958,6 +1003,51 @@
       refreshStatus();
     }
 
+// Rest are todos
+// get/set pen height
+// get/set config, view status better
+async function nickname() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'event', action: 'nickname' }));
+       // toast('Reseting EBB to default state', 'error');
+      } else {
+        await api('/nickname');
+       // toast('Reseting EBB to default state', 'error');
+       // refreshStatus();
+      }
+}
+
+async function version() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'event', action: 'version' }));
+       // toast('Reseting EBB to default state', 'error');
+      } else {
+        await post('/version');
+       // toast('Reseting EBB to default state', 'error');
+       // refreshStatus();
+      }
+}
+async function reset() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'event', action: 'reset' }));
+        toast('Reseting EBB to default state', 'error');
+      } else {
+        await post('/reset');
+        toast('Reseting EBB to default state', 'error');
+        refreshStatus();
+      }
+}
+async function reboot() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'event', action: 'reboot' }));
+        toast('Rebooting..', 'error');
+      } else {
+        await post('/reboot');
+        toast('Rebooting..', 'error');
+        refreshStatus();
+      }
+}
+
     // Emergency stop
     async function emergencyStop() {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -974,7 +1064,14 @@
     initApiBase();
     connectWebSocket();
     refreshStatus();
-    statusInterval = setInterval(refreshStatus, 2000);
+// TODO - this should all be websocket if websocket is available..
+window.onbeforeunload = function() {
+ clearInterval(statusInterval);
+ clearInterval(canvasInterval);
+    return null;
+}
+statusInterval = setInterval(refreshStatus, 10000);
+canvasInterval = setInterval(refreshCanvas, 1000);
   </script>
 </body>
 </html>

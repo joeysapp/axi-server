@@ -202,7 +202,7 @@ export class EBBMotion {
     const dy = y - this.posY;
     
     // CoreXY relies on mixed-axis moves, so delegate to the moveXY method
-    await this.moveXY(dx, dy, null);
+    return await this.moveXY(dx, dy, null);
   }
 
   /**
@@ -229,7 +229,7 @@ export class EBBMotion {
     deltaY = targetY - this.posY;
 
     if (deltaX === 0 && deltaY === 0) {
-      return;
+      return 0;
     }
 
     // Calculate duration if not provided
@@ -244,6 +244,21 @@ export class EBBMotion {
     // This gives motors time to accelerate/decelerate smoothly
     duration = Math.max(this.minMoveDurationMs, duration);
 
+    // Enforce maximum EBB step rate limit (25,000 steps/sec per motor)
+    // CoreXY: Motor 1 = A + B, Motor 2 = A - B
+    const maxMotorSteps = Math.max(
+      Math.abs(deltaX + deltaY),
+      Math.abs(deltaX - deltaY)
+    );
+    // duration must be at least (maxMotorSteps / 25000) seconds = maxMotorSteps / 25 ms
+    const minSafeDuration = Math.ceil(maxMotorSteps / 25);
+    if (duration < minSafeDuration) {
+      if (process.env.AXIDRAW_DEBUG) {
+        console.log(`[Motion] Speed limit exceeded! Throttling duration from ${duration}ms to ${minSafeDuration}ms for ${maxMotorSteps} max motor steps.`);
+      }
+      duration = minSafeDuration;
+    }
+
     // XM command: XM,duration,axisA,axisB
     // For AxiDraw (CoreXY): XM handles the conversion to Motor1 & Motor2 internally
     await this.ebb.command(`XM,${duration},${deltaX},${deltaY}`, duration + 5000);
@@ -251,6 +266,8 @@ export class EBBMotion {
     // Update position
     this.posX += deltaX;
     this.posY += deltaY;
+
+    return duration;
   }
 
   /**
@@ -267,17 +284,17 @@ export class EBBMotion {
    * @param {number} inchesY - Y movement in inches
    * @param {number} speed - Speed in inches/second (optional)
    */
-  async moveXYInches(inchesX, inchesY, speed = null) {
+  async moveXYInches(inchesX, inchesY, speed = null, durationOverride = null) {
     const stepsX = this.inchesToSteps(inchesX);
     const stepsY = this.inchesToSteps(inchesY);
 
-    let duration = null;
-    if (speed) {
+    let duration = durationOverride;
+    if (duration === null && speed) {
       const distance = Math.sqrt(inchesX * inchesX + inchesY * inchesY);
       duration = Math.max(1, Math.round((distance / speed) * 1000));
     }
 
-    await this.moveXY(stepsX, stepsY, duration);
+    return await this.moveXY(stepsX, stepsY, duration);
   }
 
   /**
@@ -286,11 +303,11 @@ export class EBBMotion {
    * @param {number} mmY - Y movement in mm
    * @param {number} speed - Speed in mm/second (optional)
    */
-  async moveXYMm(mmX, mmY, speed = null) {
+  async moveXYMm(mmX, mmY, speed = null, durationOverride = null) {
     const inchesX = mmX / this.unitsPerInch;
     const inchesY = mmY / this.unitsPerInch;
     const speedInches = speed ? speed / this.unitsPerInch : null;
-    await this.moveXYInches(inchesX, inchesY, speedInches);
+    return await this.moveXYInches(inchesX, inchesY, speedInches, durationOverride);
   }
 
   /**

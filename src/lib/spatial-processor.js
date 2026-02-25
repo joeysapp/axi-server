@@ -95,7 +95,7 @@ export class SpatialProcessor {
       },
 
       // Tick rate
-      tickRate: options.tickRate ?? 120,  // Hz
+      tickRate: options.tickRate ?? 120,  // 120 Hz
 
       // Network latency for prediction (ms)
       networkLatency: options.networkLatency ?? 15
@@ -199,6 +199,7 @@ export class SpatialProcessor {
     // Accumulate movement
     this.pendingMovement.dx += dx;
     this.pendingMovement.dy += dy;
+    this.pendingMovement.dt = (this.pendingMovement.dt || 0) + dt;
 
     // Emit movement if above threshold
     const movementMagnitude = Math.sqrt(
@@ -206,16 +207,21 @@ export class SpatialProcessor {
       this.pendingMovement.dy * this.pendingMovement.dy
     );
 
-    if (movementMagnitude >= this.movementThreshold && this.onMovement && !this.isMoving) {
+    // Also trigger if velocity dropped to 0 but we have residual movement
+    const isStopping = this.state.velocity.x === 0 && this.state.velocity.y === 0 && movementMagnitude > 0;
+
+    if ((movementMagnitude >= this.movementThreshold || isStopping) && this.onMovement && !this.isMoving) {
       this.isMoving = true;
       const dx = this.pendingMovement.dx;
       const dy = this.pendingMovement.dy;
+      const duration = Math.max(1, Math.round(this.pendingMovement.dt * 1000));
       const penDown = this.penDown;
       
       this.pendingMovement.dx = 0;
       this.pendingMovement.dy = 0;
+      this.pendingMovement.dt = 0;
 
-      Promise.resolve(this.onMovement({ dx, dy, penDown }))
+      Promise.resolve(this.onMovement({ dx, dy, duration, penDown }))
         .catch(err => console.error('[SpatialProcessor] Movement callback failed:', err))
         .finally(() => {
           this.isMoving = false;

@@ -178,7 +178,8 @@ export class EBBSerial {
 
         // Query version to verify connection
         try {
-          const version = await this.queryVersion();
+         const version = await this.queryVersion();
+		 console.log('EiBotFirmware Version: '+version);
           if (version && version.startsWith('EBB')) {
             this.firmwareVersion = this._parseVersion(version);
             this._clearErrors(); // Success - reset backoff
@@ -357,6 +358,9 @@ export class EBBSerial {
 
       this.pendingCommand = { resolve, reject, timer, expectOK: !isQuery, isQuery, needsOK, cmd };
 
+      if (process.env.AXIDRAW_DEBUG) {
+        console.log(`[SERIAL SEND] ${new Date().toISOString()} ${cmd}`);
+      }
       this.port.write(`${cmd}\r`, 'ascii', (err) => {
         if (err) {
           clearTimeout(timer);
@@ -439,6 +443,9 @@ export class EBBSerial {
     }
 
     return new Promise((resolve, reject) => {
+      if (process.env.AXIDRAW_DEBUG) {
+        console.log(`[SERIAL RAW] ${new Date().toISOString()} ${data.trim()}`);
+      }
       this.port.write(data, 'ascii', (err) => {
         if (err) {
           reject(new Error(`Write error: ${err.message}`));

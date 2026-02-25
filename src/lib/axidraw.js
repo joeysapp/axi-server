@@ -21,6 +21,12 @@ export const AxiDrawState = {
   ERROR: 'error'
 };
 
+async function awaitDebug(d = 100) {
+ return new Promise((resolve) => {
+  setTimeout(() => resolve(), d);
+ });
+}
+
 /**
  * AxiDraw - Main controller class
  */
@@ -162,12 +168,18 @@ export class AxiDraw {
         }
       });
 
-      await this.ebb.connect(portPath || this.portPath);
+     await this.ebb.connect(portPath || this.portPath);
+	 if (process.env.AXIDRAW_DEBUG) {
+	  await awaitDebug();
+	 }
 
       // Create servo controller
       this.servo = new EBBServo(this.ebb, {
         narrowBand: this.narrowBand
       });
+	 if (process.env.AXIDRAW_DEBUG) {
+	  await awaitDebug();
+	 }	 
 
       // Create motion controller
       this.motion = new EBBMotion(this.ebb, {
@@ -252,7 +264,8 @@ export class AxiDraw {
             console.log(`[Init] FIFO size increased to ${maxFifoSize}`);
           }
         } catch (e) {
-          console.log('[Init] FIFO optimization not supported on this firmware version');
+         console.log('[Init] FIFO optimization not supported on this firmware version');
+		 console.error(e);
         }
       } catch (e) {
         console.log('[Init] CS command failed:', e.message);
@@ -411,9 +424,10 @@ export class AxiDraw {
         stepsY = Math.round(y);
     }
 
-    await this.motion.moveToAbsolute(stepsX, stepsY);
+    const duration = await this.motion.moveToAbsolute(stepsX, stepsY);
     this._setState(AxiDrawState.READY);
     this._logAction('move_to', { x, y, units });
+    return duration;
   }
 
   /**
@@ -422,7 +436,7 @@ export class AxiDraw {
    * @param {number} dy - Y delta
    * @param {string} units - 'steps', 'inches', or 'mm' (default: 'mm')
    */
-  async move(dx, dy, units = 'mm') {
+  async move(dx, dy, units = 'mm', options = {}) {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
 
@@ -431,19 +445,21 @@ export class AxiDraw {
       await this.servo.penUp();
     }
 
+    let duration = null;
     switch (units) {
       case 'inches':
-        await this.motion.moveXYInches(dx, dy);
+        duration = await this.motion.moveXYInches(dx, dy, options.speed, options.duration);
         break;
       case 'mm':
-        await this.motion.moveXYMm(dx, dy);
+        duration = await this.motion.moveXYMm(dx, dy, options.speed, options.duration);
         break;
       default:
-        await this.motion.moveXY(dx, dy);
+        duration = await this.motion.moveXY(dx, dy, options.duration);
     }
 
     this._setState(AxiDrawState.READY);
     this._logAction('move', { dx, dy, units });
+    return duration;
   }
 
   /**
@@ -452,7 +468,7 @@ export class AxiDraw {
    * @param {number} dy - Y delta
    * @param {string} units - 'steps', 'inches', or 'mm' (default: 'mm')
    */
-  async lineTo(dx, dy, units = 'mm') {
+  async lineTo(dx, dy, units = 'mm', options = {}) {
     await this.ensureReady();
     this._setState(AxiDrawState.BUSY);
 
@@ -461,19 +477,21 @@ export class AxiDraw {
       await this.servo.penDown();
     }
 
+    let duration = null;
     switch (units) {
       case 'inches':
-        await this.motion.moveXYInches(dx, dy, this.motion.speedPenDown);
+        duration = await this.motion.moveXYInches(dx, dy, options.speed || this.motion.speedPenDown, options.duration);
         break;
       case 'mm':
-        await this.motion.moveXYMm(dx, dy, this.motion.speedPenDown * 25.4);
+        duration = await this.motion.moveXYMm(dx, dy, options.speed || (this.motion.speedPenDown * 25.4), options.duration);
         break;
       default:
-        await this.motion.moveXY(dx, dy);
+        duration = await this.motion.moveXY(dx, dy, options.duration);
     }
 
     this._setState(AxiDrawState.READY);
     this._logAction('line_to', { dx, dy, units });
+    return duration;
   }
 
   /**
@@ -639,17 +657,20 @@ export class AxiDraw {
     return info;
   }
 
-  /**
-   * Set device nickname
-   * @param {string} name - Nickname (3-16 chars)
-   */
-  async setNickname(name) {
-    if (!this.ebb || !this.ebb.connected) {
-      throw new Error('Not connected');
-    }
-    await this.ebb.setNickname(name);
-    this._logAction('set_nickname', { name });
-  }
+	/**
+		* Set device nickname
+		* @param {string} name - Nickname (3-16 chars)
+		*/
+	async setNickname(name) {
+		if (!this.ebb || !this.ebb.connected) {
+			throw new Error('Not connected');
+		}
+		await this.ebb.setNickname(name);
+		// This command causes the EBB to drop off the USB, then completely reboot as if just plugged in. Useful after a name change with the ST command.
+		console.log('Rebooting, you will need to reconnect..');
+		await this.ebb.reboot();
+		this._logAction('set_nickname', { name });
+	}
 
   /**
    * Get action history

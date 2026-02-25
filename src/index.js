@@ -271,7 +271,8 @@ const API_DOCS = {
 		AXIDRAW_SPEED_UP: 'Pen-up travel speed in inches/sec (default: 7.5)'
 	},
 	spatialProcessing: {
-		tickRate: '120 Hz - fixed update rate for velocity integration',
+	 tickRate: '120 Hz - fixed update rate for velocity integration',
+	 // tickRate: '120 Hz - fixed update rate for velocity integration',	 
 		deadzone: '0.08 - input deadzone threshold',
 		velocityCurve: 'cubic - response curve for precise low-speed control',
 		maxLinearSpeed: '200 mm/s - maximum planar velocity',
@@ -476,6 +477,14 @@ async function handleRequest(req, res) {
 			res.end(fs.readFileSync(new URL('./public/index.html', import.meta.url), 'utf8'));
 			return;
 		}
+	 if (method === 'GET' && path.indexOf('/public') !== -1) {
+			res.writeHead(200, {
+			 'Content-Type': 'image/png',
+				'Access-Control-Allow-Origin': '*'
+			});
+			res.end(fs.readFileSync(new URL('.'+path, import.meta.url), 'utf8'));
+			return;
+		}	 
 
 		// ==================== Status & Info ====================
 		if (method === 'GET' && path === '/') {
