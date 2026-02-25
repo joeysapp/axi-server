@@ -419,39 +419,55 @@
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>AxiDraw Control Panel</h1>
+   <header style="display: flex; justify-content: space-between; align-items: center;">
+     <h1 style="font-family: monospace;">axi-core</h1>
       <div class="status-bar">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">Checking...</span>
       </div>
     </header>
 
-    <!-- API Configuration -->
-    <div class="card" style="padding: 12px; margin-bottom: 12px;">
-      <div class="api-config" style="margin-bottom: 0;">
-        <input type="text" id="apiHost" placeholder="http://localhost:9700" style="padding: 6px 10px;">
-        <button class="btn small" onclick="updateApiHost()">Set</button>
-        <button class="btn success small" id="connectBtn" onclick="connect()">Connect</button>
-        <button class="btn small" id="disconnectBtn" onclick="disconnect()">Disconnect</button>
-      </div>
-    </div>
-
     <!-- Position & Canvas -->
     <div class="card" style="padding: 12px; margin-bottom: 12px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <h2 style="margin:0;">Position & Canvas</h2>
+        <h2 style="margin:0;">Canvas</h2>
         <div style="font-family: monospace; font-size: 0.9rem; color: var(--text-dim);">
-          X: <span id="posX" style="color:var(--text);">0.00</span> | Y: <span id="posY" style="color:var(--text);">0.00</span> mm
+          X: <span id="posX" style="color:var(--text);">0.00</span> | Y: <span id="posY" style="color:var(--text);">0.00</span> mm | <span class="" id="penStatus">Pen Unknown</span>
         </div>
       </div>
       <div class="canvas-container" style="margin-top: 4px;">
         <canvas id="plotterCanvas"></canvas>
       </div>
-      <div class="btn-row" style="margin-top: 8px;">
-        <button class="btn small" onclick="downloadPathSVG()">Download SVG</button>
+     <div class="btn-row" style="margin-top: 8px;">
+        <button class="btn small success" onclick="goHome()">Go Home</button>	  
+        <button class="btn small" onclick="downloadPathSVG()">Save SVG</button>
         <button class="btn small warning" onclick="clearPath()">Clear Path</button>
       </div>
+    </div>
+    <!-- Pen Control -->
+    <div class="card" style="padding: 12px; margin-bottom: 12px;">
+      <h2 style="margin-bottom: 8px;">Controls</h2>
+          <div class="dpad-container" style="gap: 2px;">
+            <div class="dpad-row" style="gap: 2px;">
+              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(-1, -1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8598;</button>
+              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(0, -1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8593;</button>
+              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(1, -1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8599;</button>
+            </div>
+            <div class="dpad-row" style="gap: 2px;">
+             <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(-1, 0)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8592;</button>
+             <button class="dpad-btn" id="penButton" style="width:40px; height:40px; font-size: 0.7rem;" onclick="penToggle()">
+			  <span class="pen-icon" id="penIcon">&#9999;&#65039;</span>
+			 </button>			 
+             
+             <button class="dpad-btn home" style="display: none; width:40px; height:40px; font-size: 0.7rem;" onclick="goHome()">HOME</button>
+              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(1, 0)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8594;</button>
+            </div>
+            <div class="dpad-row" style="gap: 2px;">
+              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(-1, 1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8601;</button>
+              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(0, 1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8595;</button>
+              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(1, 1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8600;</button>
+            </div>
+          </div>
     </div>
 
     <!-- SVG Upload & Queue -->
@@ -469,7 +485,8 @@
           <div class="btn-row" style="margin-top: 4px;">
             <button class="btn small" onclick="pauseQueue()">Pause</button>
             <button class="btn small" onclick="resumeQueue()">Resume</button>
-            <button class="btn small warning" onclick="clearQueue()">Clear</button>
+           <button class="btn small warning" onclick="clearQueue()">Clear</button>
+          <button class="btn primary small" onclick="emergencyStop()">STOP</button>		   
           </div>
         </div>
       </div>
@@ -477,46 +494,10 @@
 
     <!-- Pen Control -->
     <div class="card" style="padding: 12px; margin-bottom: 12px;">
-      <div style="display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <div class="pen-indicator" style="margin: 0; padding: 6px 12px;">
-            <span class="pen-icon" id="penIcon">&#9999;&#65039;</span>
-            <span id="penStatus" style="display:none;">Unknown</span>
-          </div>
-          <button class="btn small" onclick="penUp()">Up</button>
-          <button class="btn small" onclick="penDown()">Down</button>
-          <button class="btn primary small" onclick="penToggle()">Toggle</button>
-        </div>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn small warning" onclick="goHome()">HOME</button>
-          <button class="btn primary small" onclick="emergencyStop()">STOP</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Movement & Speed -->
-    <div class="card" style="padding: 12px; margin-bottom: 12px;">
-      <h2 style="margin-bottom: 8px;">Movement & Speed</h2>
+      <h2 style="margin-bottom: 8px;">Speed</h2>
       <div style="display: flex; gap: 16px; flex-wrap: wrap;">
         <div style="flex: 1; min-width: 140px; display: flex; justify-content: center;">
-          <div class="dpad-container" style="gap: 2px;">
-            <div class="dpad-row" style="gap: 2px;">
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(-1, -1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8598;</button>
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(0, -1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8593;</button>
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(1, -1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8599;</button>
-            </div>
-            <div class="dpad-row" style="gap: 2px;">
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(-1, 0)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8592;</button>
-              <button class="dpad-btn home" style="width:40px; height:40px; font-size: 0.7rem;" onclick="goHome()">HOME</button>
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(1, 0)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8594;</button>
-            </div>
-            <div class="dpad-row" style="gap: 2px;">
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(-1, 1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8601;</button>
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(0, 1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8595;</button>
-              <button class="dpad-btn" style="width:40px; height:40px;" onpointerdown="startMove(1, 1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#8600;</button>
-            </div>
-          </div>
-        </div>
+
         <div style="flex: 2; display: flex; flex-direction: column; gap: 8px; min-width: 180px;">
           <div class="slider-group" style="margin:0;">
             <div class="slider-label" style="margin-bottom: 2px;">
@@ -539,10 +520,26 @@
             </div>
             <input type="range" id="speedUp" min="1" max="15" step="0.5" value="3.0" oninput="updateSpeedDisplay()" onchange="setSpeed()">
           </div>
-        </div>
+          </div>		   
+		  </div>
+		   
+		  </div>		 
+		</div>
+
+    <!-- AxiDraw Host configuration -->
+    <div class="card" style="padding: 12px; margin-bottom: 20vh;">
+      <h2 style="margin-bottom: 8px;">AxiDraw Host</h2>
+      <div class="api-config" style="display: flex; flex-direction: column; margin-bottom: 0;">
+       <input type="text" id="apiHost" placeholder="http://localhost:9700" style="padding: 6px 10px;">
+		<div class="display: flex; justify-content: space-between;">
+        <button class="btn small" id="connectBtn" onclick="connect()">Connect</button>
+         <button class="btn primary small" id="disconnectBtn" onclick="disconnect()">Disconnect</button>
+         <button class="btn success small" onclick="updateApiHost()">Save to Browser</button>
+		 </div>
       </div>
     </div>
-  </div>
+
+
 
   <div class="toast-container" id="toasts"></div>
 
@@ -626,10 +623,13 @@
               document.getElementById('posY').textContent = data.position.y.toFixed(2);
             }
             if (data.penDown !== undefined) {
-              const penIcon = document.getElementById('penIcon');
-              const penStatus = document.getElementById('penStatus');
+             const penIcon = document.getElementById('penIcon');
+             const penButton = document.getElementById('penButton');			 
+             const penStatus = document.getElementById('penStatus');
+             penButton.className = 'dpad-btn ' + (data.penDown ? 'primary' : 'warning');			 
               penIcon.className = 'pen-icon ' + (data.penDown ? 'down' : 'up');
-              penStatus.textContent = data.penDown ? 'Down' : 'Up';
+             penStatus.textContent = data.penDown ? 'Pen Down' : 'Pen Up';
+             penStatus.className = data.penDown ? 'primary' : '';			 
             }
           }
         } catch(e) {}
@@ -743,7 +743,7 @@
       // Draw current position
       if (currentPos) {
         // Red if pen is down, green if pen is up
-        ctx.fillStyle = document.getElementById('penStatus').textContent === 'Down' ? '#e94560' : '#4ecca3';
+        ctx.fillStyle = document.getElementById('penStatus').textContent === 'Pen Down' ? '#e94560' : '#4ecca3';
         ctx.beginPath();
         ctx.arc(currentPos.x * scaleX, currentPos.y * scaleY, 5, 0, Math.PI * 2);
         ctx.fill();
@@ -808,8 +808,8 @@
     }
 
     async function penToggle() {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'event', action: 'pen_toggle' }));
+     if (ws && ws.readyState === WebSocket.OPEN) {
+       ws.send(JSON.stringify({ type: 'event', action: 'pen_toggle' }));
       } else {
         await post('/pen/toggle');
         refreshStatus();

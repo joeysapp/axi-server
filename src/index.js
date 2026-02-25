@@ -46,6 +46,7 @@ async function flushCoalesceBuffer(type, axi) {
 	const pending = buffer.pending;
 	buffer.pending = [];
 
+ // [TODO] I believe this is where we need to use our batch command functionality
 	// Process each unit type that has accumulated movement
 	for (const { units, dx, dy } of movements) {
 		try {
