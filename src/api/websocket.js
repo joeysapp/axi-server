@@ -46,8 +46,8 @@ export function setupWebSocketServer(server, axi, config) {
 		 networkLatency: 15,
 		 // We accumulate momvemnts until we have over half of a mm..
 		 // .. so this slightly reduces the sound, but it does reduce responsiveness too..
-		 // movementThreshold:0.20,		 
-		 movementThreshold: 0.1,
+		 // movementThreshold:0.1,		 
+		 movementThreshold: 0.0001,
 
 			// Movement callback - send to AxiDraw
 			onMovement: async (movement) => {

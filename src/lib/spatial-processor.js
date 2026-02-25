@@ -213,8 +213,9 @@ export class SpatialProcessor {
     if ((movementMagnitude >= this.movementThreshold || isStopping) && this.onMovement && !this.isMoving) {
       this.isMoving = true;
       const dx = this.pendingMovement.dx;
-      const dy = this.pendingMovement.dy;
-      const duration = Math.max(1, Math.round(this.pendingMovement.dt * 1000));
+     const dy = this.pendingMovement.dy;
+	 // Minimum duration is 2 ms for continuous motion with the EBB
+     const duration = Math.max(2, Math.round(this.pendingMovement.dt * 1000));
       const penDown = this.penDown;
       
       this.pendingMovement.dx = 0;

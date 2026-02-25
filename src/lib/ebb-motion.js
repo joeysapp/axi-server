@@ -95,9 +95,9 @@ export class EBBMotion {
     this.speedPenUp = options.speedPenUp || 7.5;
     this.acceleration = options.acceleration || 40.0; // in/s^2
 
-    // Minimum movement duration in ms. EBB supports down to 1ms.
-    // Set to 1ms to allow rapid processing of tiny line segments from SVG arcs.
-    this.minMoveDurationMs = options.minMoveDurationMs || 1;
+    // Minimum movement duration in ms. EBB supports down to 2ms.
+    // Set to 2ms to allow rapid processing of tiny line segments from SVG arcs.
+    this.minMoveDurationMs = options.minMoveDurationMs || 2;
 
     // Motor state
     this.motorsEnabled = false;
