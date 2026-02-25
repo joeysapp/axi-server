@@ -119,6 +119,7 @@ export class SpatialProcessor {
     // Movement accumulator for batching
     this.pendingMovement = { dx: 0, dy: 0 };
     this.movementThreshold = options.movementThreshold ?? 0.1;  // mm
+    this.isMoving = false;
 
     // Pen state
     this.penDown = false;
@@ -205,14 +206,20 @@ export class SpatialProcessor {
       this.pendingMovement.dy * this.pendingMovement.dy
     );
 
-    if (movementMagnitude >= this.movementThreshold && this.onMovement) {
-      this.onMovement({
-        dx: this.pendingMovement.dx,
-        dy: this.pendingMovement.dy,
-        penDown: this.penDown
-      });
+    if (movementMagnitude >= this.movementThreshold && this.onMovement && !this.isMoving) {
+      this.isMoving = true;
+      const dx = this.pendingMovement.dx;
+      const dy = this.pendingMovement.dy;
+      const penDown = this.penDown;
+      
       this.pendingMovement.dx = 0;
       this.pendingMovement.dy = 0;
+
+      Promise.resolve(this.onMovement({ dx, dy, penDown }))
+        .catch(err => console.error('[SpatialProcessor] Movement callback failed:', err))
+        .finally(() => {
+          this.isMoving = false;
+        });
     }
 
     // Emit state update

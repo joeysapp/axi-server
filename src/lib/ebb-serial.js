@@ -678,7 +678,16 @@ export class EBBSerial {
    * @param {boolean} disableMotors - Also disable motors
    */
   async emergencyStop(disableMotors = false) {
-    return this.command(`ES${disableMotors ? ',1' : ''}`);
+    this.commandQueue = [];
+    if (this.pendingCommand) {
+      clearTimeout(this.pendingCommand.timer);
+      this.pendingCommand.reject(new Error("Emergency Stop aborted pending command"));
+      this.pendingCommand = null;
+    }
+    const cmd = `ES${disableMotors ? ',1' : ''}\r`;
+    await this.writeRaw(cmd);
+    this.isProcessingQueue = false;
+    return "OK";
   }
 
   // ==================== Connection Info ====================

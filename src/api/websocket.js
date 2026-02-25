@@ -130,6 +130,9 @@ export function setupWebSocketServer(server, axi, config) {
 		ws.on('message', (data) => {
 			try {
 				const message = JSON.parse(data.toString());
+				if (process.env.AXIDRAW_DEBUG) {
+					console.log(`[WS RECV] ${new Date().toISOString()} ${JSON.stringify(message)}`);
+				}
 				handleWebSocketMessage(ws, message, path);
 			} catch (e) {
 				console.error('[WebSocket] Parse error:', e.message);
@@ -261,4 +264,6 @@ export function setupWebSocketServer(server, axi, config) {
 				console.log(`[WebSocket] Unknown message type: ${type}`);
 		}
 	}
+
+	return wss;
 }

@@ -303,15 +303,19 @@ async function parseBody(req) {
 		let body = '';
 		req.on('data', chunk => body += chunk);
 		req.on('end', () => {
-			if (!body) {
-				resolve({});
-				return;
+			let parsed = {};
+			if (body) {
+				try {
+					parsed = JSON.parse(body);
+				} catch (e) {
+					reject(new Error('Invalid JSON body'));
+					return;
+				}
 			}
-			try {
-				resolve(JSON.parse(body));
-			} catch (e) {
-				reject(new Error('Invalid JSON body'));
+			if (process.env.AXIDRAW_DEBUG) {
+				console.log(`[REST RECV] ${new Date().toISOString()} ${req.method} ${req.url}`, JSON.stringify(parsed));
 			}
+			resolve(parsed);
 		});
 		req.on('error', reject);
 	});
@@ -1005,7 +1009,7 @@ SPATIAL PROCESSING
 // Create and start server
 const server = http.createServer(handleRequest);
 
-setupWebSocketServer(server, axi, { MODEL });
+const wss = setupWebSocketServer(server, axi, { MODEL });
 
 server.listen(PORT, HOST, async () => {
 	console.log(`
@@ -1044,6 +1048,12 @@ process.on('SIGINT', async () => {
 	} catch (e) {
 		// Ignore
 	}
+	if (wss) {
+		for (const client of wss.clients) {
+			client.terminate();
+		}
+	}
+	server.closeAllConnections?.();
 	server.close(() => {
 		console.log('[Shutdown] Server closed');
 		process.exit(0);
@@ -1057,6 +1067,12 @@ process.on('SIGTERM', async () => {
 	} catch (e) {
 		// Ignore
 	}
+	if (wss) {
+		for (const client of wss.clients) {
+			client.terminate();
+		}
+	}
+	server.closeAllConnections?.();
 	server.close(() => {
 		console.log('[Shutdown] Server closed');
 		process.exit(0);
