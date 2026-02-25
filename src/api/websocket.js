@@ -26,11 +26,11 @@ export function setupWebSocketServer(server, axi, config) {
 		const modelConfig = AXIDRAW_MODELS[MODEL] || AXIDRAW_MODELS.V2_V3;
 
 		spatialProcessor = new SpatialProcessor({
-			// Bounds from AxiDraw model
+			// Bounds from AxiDraw model (converted to mm)
 			minX: 0,
-			maxX: modelConfig.xTravel,
+			maxX: modelConfig.xTravel * 25.4,
 			minY: 0,
-			maxY: modelConfig.yTravel,
+			maxY: modelConfig.yTravel * 25.4,
 
 			// Processing parameters
 			deadzone: 0.08,
