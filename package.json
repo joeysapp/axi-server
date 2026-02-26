@@ -5,8 +5,9 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "start": "node backend/index.js",
+    "dev": "node --watch backend/index.js",
+    "build-ui": "bash scripts/build-ui.sh",
     "test": "bash scripts/test-endpoints.sh"
   },
   "keywords": [

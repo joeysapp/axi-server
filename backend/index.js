@@ -132,14 +132,63 @@ const svgParser = new SVGParser();
 	* Control Panel HTML
 	*
 	* Self-contained web UI for controlling the AxiDraw plotter.
-	* This interface is designed to work standalone and can be hosted separately
-	* from any static file server, React/Vite app, or CDN - simply update the
-	* API_BASE_URL to point to your AxiDraw server.
 	*/
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const MIME_TYPES = {
+	'.html': 'text/html',
+	'.js': 'text/javascript',
+	'.css': 'text/css',
+	'.json': 'application/json',
+	'.png': 'image/png',
+	'.jpg': 'image/jpeg',
+	'.gif': 'image/gif',
+	'.svg': 'image/svg+xml',
+	'.wav': 'audio/wav',
+	'.mp4': 'video/mp4',
+	'.woff': 'application/font-woff',
+	'.ttf': 'application/font-ttf',
+	'.eot': 'application/vnd.ms-fontobject',
+	'.otf': 'application/font-otf',
+	'.wasm': 'application/wasm',
+	'.ico': 'image/x-icon',
+};
+
+/**
+	* Serve a static file with correct MIME type
+	*/
+function serveStatic(res, filePath) {
+	try {
+		if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+			// If it's a directory or doesn't exist, try index.html for SPA routing
+			const indexHtml = path.join(__dirname, 'public', 'index.html');
+			if (fs.existsSync(indexHtml)) {
+				filePath = indexHtml;
+			} else {
+				sendError(res, 'File not found', 404);
+				return;
+			}
+		}
+
+		const ext = path.extname(filePath).toLowerCase();
+		const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+		res.writeHead(200, {
+			'Content-Type': contentType,
+			'Access-Control-Allow-Origin': '*',
+			'Cache-Control': 'public, max-age=3600'
+		});
+
+		const stream = fs.createReadStream(filePath);
+		stream.pipe(res);
+	} catch (err) {
+		console.error(`[Static] Error serving ${filePath}:`, err.message);
+		sendError(res, 'Internal server error', 500);
+	}
+}
 
 // Set up job processor
 queue.processor = async (job, updateProgress) => {
@@ -450,7 +499,7 @@ async function executeBatchCommand(endpoint, body) {
 // Request handler
 async function handleRequest(req, res) {
 	const url = new URL(req.url, `http://${req.headers.host}`);
-	const path = url.pathname;
+	const pathname = url.pathname;
 	const method = req.method.toUpperCase();
 
 	// CORS preflight
@@ -464,30 +513,34 @@ async function handleRequest(req, res) {
 		return;
 	}
 
-	console.log(`[HTTP] ${method} ${path}`);
+	console.log(`[HTTP] ${method} ${pathname}`);
 
 	try {
 		// Route handling
 		// ==================== Web UI ====================
-		if (method === 'GET' && path === '/ui') {
-			res.writeHead(200, {
-				'Content-Type': 'text/html',
-				'Access-Control-Allow-Origin': '*'
-			});
-			res.end(fs.readFileSync(new URL('./public/index.html', import.meta.url), 'utf8'));
+		if (method === 'GET' && (pathname === '/ui' || pathname.startsWith('/ui/'))) {
+			// Serve index.html for /ui and any sub-routes (SPA)
+			const filePath = path.join(__dirname, 'public', 'index.html');
+			serveStatic(res, filePath);
 			return;
 		}
-	 if (method === 'GET' && path.indexOf('/public') !== -1) {
-			res.writeHead(200, {
-			 'Content-Type': 'image/png',
-				'Access-Control-Allow-Origin': '*'
-			});
-			res.end(fs.readFileSync(new URL('.'+path, import.meta.url), 'utf8'));
-			return;
-		}	 
+
+		// Serve assets (anything with an extension that isn't an API call)
+		const hasExtension = pathname.includes('.');
+		if (method === 'GET' && hasExtension && !pathname.startsWith('/api/')) {
+			// Try to serve from public directory
+			const relativePath = pathname.startsWith('/assets/') ? pathname : pathname.replace(/^\//, '');
+			const filePath = path.join(__dirname, 'public', relativePath);
+			
+			if (fs.existsSync(filePath)) {
+				serveStatic(res, filePath);
+				return;
+			}
+			// Fall through to 404 if not found
+		}
 
 		// ==================== Status & Info ====================
-		if (method === 'GET' && path === '/') {
+		if (method === 'GET' && pathname === '/') {
 			// Return docs as formatted text
 			res.writeHead(200, {
 				'Content-Type': 'text/plain',
@@ -497,12 +550,12 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'GET' && path === '/info') {
+		if (method === 'GET' && pathname === '/info') {
 			sendJSON(res, API_DOCS);
 			return;
 		}
 
-		if (method === 'GET' && path === '/health') {
+		if (method === 'GET' && pathname === '/health') {
 			const status = await axi.getStatus(false);
 			sendJSON(res, {
 				ok: status.connected,
@@ -515,59 +568,59 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'GET' && path === '/status') {
+		if (method === 'GET' && pathname === '/status') {
 			const queryHardware = url.searchParams.get('hardware') === 'true';
 			const status = await axi.getStatus(queryHardware);
 			sendJSON(res, status);
 			return;
 		}
 
-		if (method === 'GET' && path === '/history') {
+		if (method === 'GET' && pathname === '/history') {
 			const limit = parseInt(url.searchParams.get('limit') || '100', 10);
 			sendJSON(res, { history: axi.getHistory(limit) });
 			return;
 		}
 
-		if (method === 'GET' && path === '/ports') {
+		if (method === 'GET' && pathname === '/ports') {
 			const ports = await EBBSerial.listPorts();
 			sendJSON(res, { ports });
 			return;
 		}
 
 		// ==================== Connection ====================
-		if (method === 'POST' && path === '/connect') {
+		if (method === 'POST' && pathname === '/connect') {
 			const body = await parseBody(req);
 			await axi.connect(body.port);
 			sendSuccess(res, { port: axi.ebb?.portPath });
 			return;
 		}
 
-		if (method === 'POST' && path === '/disconnect') {
+		if (method === 'POST' && pathname === '/disconnect') {
 			await axi.disconnect();
 			sendSuccess(res);
 			return;
 		}
 
-		if (method === 'POST' && path === '/initialize') {
+		if (method === 'POST' && pathname === '/initialize') {
 			await axi.initialize();
 			sendSuccess(res, { state: axi.state });
 			return;
 		}
 
 		// ==================== Device ====================
-		if (method === 'GET' && path === '/version') {
+		if (method === 'GET' && pathname === '/version') {
 			const version = await axi.getVersion();
 			sendJSON(res, { version });
 			return;
 		}
 
-		if (method === 'GET' && path === '/nickname') {
+		if (method === 'GET' && pathname === '/nickname') {
 			const info = await axi.getInfo();
 			sendJSON(res, { nickname: info?.nickname || null });
 			return;
 		}
 
-		if (method === 'POST' && path === '/nickname') {
+		if (method === 'POST' && pathname === '/nickname') {
 			const body = await parseBody(req);
 			if (!body.name) {
 				sendError(res, 'Missing name parameter');
@@ -578,44 +631,44 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/reboot') {
+		if (method === 'POST' && pathname === '/reboot') {
 			await axi.reboot();
 			sendSuccess(res, { message: 'Rebooting...' });
 			return;
 		}
 
-		if (method === 'POST' && path === '/reset') {
+		if (method === 'POST' && pathname === '/reset') {
 			await axi.reset();
 			sendSuccess(res);
 			return;
 		}
 
 		// ==================== Pen Control ====================
-		if (method === 'POST' && path === '/pen/up') {
+		if (method === 'POST' && pathname === '/pen/up') {
 			const time = await axi.penUp();
 			sendSuccess(res, { time });
 			return;
 		}
 
-		if (method === 'POST' && path === '/pen/down') {
+		if (method === 'POST' && pathname === '/pen/down') {
 			const time = await axi.penDown();
 			sendSuccess(res, { time });
 			return;
 		}
 
-		if (method === 'POST' && path === '/pen/toggle') {
+		if (method === 'POST' && pathname === '/pen/toggle') {
 			const time = await axi.penToggle();
 			sendSuccess(res, { time, isUp: axi.servo?.isUp });
 			return;
 		}
 
-		if (method === 'GET' && path === '/pen/status') {
+		if (method === 'GET' && pathname === '/pen/status') {
 			const status = axi.servo?.getStatus() || null;
 			sendJSON(res, { pen: status });
 			return;
 		}
 
-		if (method === 'POST' && path === '/pen/config') {
+		if (method === 'POST' && pathname === '/pen/config') {
 			const body = await parseBody(req);
 			await axi.configurePen(body);
 			sendSuccess(res, { config: axi.servo?.getStatus()?.config });
@@ -623,14 +676,14 @@ async function handleRequest(req, res) {
 		}
 
 		// ==================== Motion ====================
-		if (method === 'POST' && path === '/home') {
+		if (method === 'POST' && pathname === '/home') {
 			const body = await parseBody(req);
 			await axi.home(body.rate);
 			sendSuccess(res);
 			return;
 		}
 
-		if (method === 'POST' && path === '/move') {
+		if (method === 'POST' && pathname === '/move') {
 			const body = await parseBody(req);
 			if (body.dx === undefined || body.dy === undefined) {
 				sendError(res, 'Missing dx or dy parameters');
@@ -651,7 +704,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/moveto') {
+		if (method === 'POST' && pathname === '/moveto') {
 			const body = await parseBody(req);
 			if (body.x === undefined || body.y === undefined) {
 				sendError(res, 'Missing x or y parameters');
@@ -662,7 +715,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/lineto') {
+		if (method === 'POST' && pathname === '/lineto') {
 			const body = await parseBody(req);
 			if (body.dx === undefined || body.dy === undefined) {
 				sendError(res, 'Missing dx or dy parameters');
@@ -683,7 +736,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/execute') {
+		if (method === 'POST' && pathname === '/execute') {
 			const body = await parseBody(req);
 			if (!Array.isArray(body.commands)) {
 				sendError(res, 'Missing commands array');
@@ -694,7 +747,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/batch') {
+		if (method === 'POST' && pathname === '/batch') {
 			const body = await parseBody(req);
 			if (!Array.isArray(body.commands)) {
 				sendError(res, 'Missing commands array');
@@ -720,13 +773,13 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'GET' && path === '/position') {
+		if (method === 'GET' && pathname === '/position') {
 			const position = axi.motion?.getPosition() || null;
 			sendJSON(res, { position });
 			return;
 		}
 
-		if (method === 'GET' && path === '/speed') {
+		if (method === 'GET' && pathname === '/speed') {
 			sendJSON(res, {
 				speed: {
 					penDown: axi.motion?.speedPenDown ?? SPEED_PEN_DOWN,
@@ -737,7 +790,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/speed') {
+		if (method === 'POST' && pathname === '/speed') {
 			const body = await parseBody(req);
 			const speeds = {};
 			if (body.penDown !== undefined) {
@@ -763,26 +816,26 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/motors/on') {
+		if (method === 'POST' && pathname === '/motors/on') {
 			await axi.motorsOn();
 			sendSuccess(res);
 			return;
 		}
 
-		if (method === 'POST' && path === '/motors/off') {
+		if (method === 'POST' && pathname === '/motors/off') {
 			await axi.motorsOff();
 			sendSuccess(res);
 			return;
 		}
 
-		if (method === 'POST' && path === '/stop') {
+		if (method === 'POST' && pathname === '/stop') {
 			await axi.emergencyStop();
 			sendSuccess(res, { message: 'Emergency stop executed' });
 			return;
 		}
 
 		// ==================== Queue ====================
-		if (method === 'GET' && path === '/queue') {
+		if (method === 'GET' && pathname === '/queue') {
 			sendJSON(res, {
 				status: queue.getStatus(),
 				jobs: queue.getQueue()
@@ -790,7 +843,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/queue') {
+		if (method === 'POST' && pathname === '/queue') {
 			const body = await parseBody(req);
 			if (!body.type || !body.data) {
 				sendError(res, 'Missing type or data');
@@ -807,8 +860,8 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'DELETE' && path.startsWith('/queue/')) {
-			const id = path.slice(7);
+		if (method === 'DELETE' && pathname.startsWith('/queue/')) {
+			const id = pathname.slice(7);
 			const success = await queue.cancel(id);
 			if (success) {
 				sendSuccess(res);
@@ -818,32 +871,32 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/queue/pause') {
+		if (method === 'POST' && pathname === '/queue/pause') {
 			queue.pause();
 			sendSuccess(res);
 			return;
 		}
 
-		if (method === 'POST' && path === '/queue/resume') {
+		if (method === 'POST' && pathname === '/queue/resume') {
 			queue.resume();
 			sendSuccess(res);
 			return;
 		}
 
-		if (method === 'POST' && path === '/queue/clear') {
+		if (method === 'POST' && pathname === '/queue/clear') {
 			const count = queue.clear();
 			sendSuccess(res, { cleared: count });
 			return;
 		}
 
-		if (method === 'GET' && path === '/queue/history') {
+		if (method === 'GET' && pathname === '/queue/history') {
 			const limit = parseInt(url.searchParams.get('limit') || '50', 10);
 			sendJSON(res, { history: queue.getHistory(limit) });
 			return;
 		}
 
 		// ==================== SVG ====================
-		if (method === 'POST' && path === '/svg') {
+		if (method === 'POST' && pathname === '/svg') {
 			const body = await parseBody(req);
 			if (!body.svg) {
 				sendError(res, 'Missing svg data');
@@ -866,7 +919,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/svg/upload') {
+		if (method === 'POST' && pathname === '/svg/upload') {
 			const contentType = req.headers['content-type'] || '';
 			if (!contentType.includes('multipart/form-data')) {
 				sendError(res, 'Expected multipart/form-data');
@@ -900,7 +953,7 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/svg/preview') {
+		if (method === 'POST' && pathname === '/svg/preview') {
 			const body = await parseBody(req);
 			if (!body.svg) {
 				sendError(res, 'Missing svg data');
@@ -917,7 +970,7 @@ async function handleRequest(req, res) {
 		}
 
 		// ==================== Path State ====================
-		if (method === 'GET' && path === '/path') {
+		if (method === 'GET' && pathname === '/path') {
 			const history = axi.pathHistory || [];
 			let svgPath = '';
 			for (const point of history) {
@@ -940,14 +993,14 @@ async function handleRequest(req, res) {
 			return;
 		}
 
-		if (method === 'POST' && path === '/path/clear') {
+		if (method === 'POST' && pathname === '/path/clear') {
 			axi.clearPathHistory?.();
 			sendSuccess(res, { message: 'Path history cleared' });
 			return;
 		}
 
 		// 404 - Not found
-		sendError(res, `Unknown endpoint: ${method} ${path}`, 404);
+		sendError(res, `Unknown endpoint: ${method} ${pathname}`, 404);
 
 	} catch (err) {
 		console.error(`[HTTP] Error: ${err.message}`);
