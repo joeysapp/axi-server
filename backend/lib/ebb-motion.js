@@ -251,7 +251,7 @@ export class EBBMotion {
     );
     // duration must be at least (maxMotorSteps / 25000) seconds = maxMotorSteps / 25 ms
     const minSafeDuration = Math.ceil(maxMotorSteps / 25);
-    if (duration < minSafeDuration) {
+   if (duration < minSafeDuration || duration > Number.MAX_SAFE_INTEGER) {
       if (process.env.AXIDRAW_DEBUG) {
         console.log(`[Motion] Speed limit exceeded! Throttling duration from ${duration}ms to ${minSafeDuration}ms for ${maxMotorSteps} max motor steps.`);
       }

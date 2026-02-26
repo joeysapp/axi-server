@@ -339,6 +339,16 @@ export class AxiDraw {
     return time;
   }
 
+  /**
+   * Synchronize pen state with hardware
+   */
+  async syncPenState() {
+    await this.ensureReady();
+    const isUp = await this.servo.queryHardwareState();
+    this._logAction('pen_sync', { isUp });
+    return isUp;
+  }
+
  /**
   * [TODO] There's some weird behavior this causes on the frontend. Debug
    * Toggle pen state

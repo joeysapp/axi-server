@@ -249,8 +249,10 @@ const API_DOCS = {
 		'POST /pen/up': 'Raise the pen',
 		'POST /pen/down': 'Lower the pen',
 		'POST /pen/toggle': 'Toggle pen state',
+		'POST /pen/sync': 'Sync pen state with hardware',
 		'GET /pen/status': 'Get pen status',
 		'POST /pen/config': 'Configure pen settings (body: { posUp?, posDown?, rateRaise?, rateLower?, delayUp?, delayDown? })',
+		'POST /config': 'Universal configuration endpoint (body: { penDownSpeed?, penUpSpeed?, posUp?, posDown?, rateRaise?, rateLower? })',
 
 		// Motion
 		'POST /home': 'Move to home position (0,0) - body: { rate?: number }',
@@ -662,6 +664,12 @@ async function handleRequest(req, res) {
 			return;
 		}
 
+		if (method === 'POST' && pathname === '/pen/sync') {
+			const isUp = await axi.syncPenState();
+			sendSuccess(res, { isUp });
+			return;
+		}
+
 		if (method === 'GET' && pathname === '/pen/status') {
 			const status = axi.servo?.getStatus() || null;
 			sendJSON(res, { pen: status });
@@ -672,6 +680,37 @@ async function handleRequest(req, res) {
 			const body = await parseBody(req);
 			await axi.configurePen(body);
 			sendSuccess(res, { config: axi.servo?.getStatus()?.config });
+			return;
+		}
+
+		if (method === 'POST' && pathname === '/config') {
+			const body = await parseBody(req);
+			
+      // Update speeds
+      if (body.penDownSpeed !== undefined || body.penUpSpeed !== undefined) {
+        if (axi.motion) {
+          axi.motion.updateSpeeds({
+            penDown: body.penDownSpeed,
+            penUp: body.penUpSpeed
+          });
+        }
+      }
+
+      // Update pen settings
+      const penConfig = {};
+      if (body.posUp !== undefined) penConfig.posUp = body.posUp;
+      if (body.posDown !== undefined) penConfig.posDown = body.posDown;
+      if (body.rateRaise !== undefined) penConfig.rateRaise = body.rateRaise;
+      if (body.rateLower !== undefined) penConfig.rateLower = body.rateLower;
+      
+      if (Object.keys(penConfig).length > 0) {
+        await axi.configurePen(penConfig);
+      }
+
+			sendSuccess(res, { 
+        speed: axi.motion?.getStatus()?.speed,
+        pen: axi.servo?.getStatus()?.config
+      });
 			return;
 		}
 
@@ -1074,6 +1113,7 @@ const server = http.createServer(handleRequest);
 const wss = setupWebSocketServer(server, axi, { MODEL });
 
 server.listen(PORT, HOST, async () => {
+	const listenHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
 	console.log(`
 ${'='.repeat(50)}
   AxiDraw HTTP + WebSocket Server
@@ -1081,9 +1121,9 @@ ${'='.repeat(50)}
   HTTP:      http://${HOST}:${PORT}
   WebSocket: ws://${HOST}:${PORT}/spatial
 
-  Documentation: http://localhost:${PORT}/
-  Health check:  http://localhost:${PORT}/health
-  Web UI:        http://localhost:${PORT}/ui
+  Documentation: http://${listenHost}:${PORT}/
+  Health check:  http://${listenHost}:${PORT}/health
+  Web UI:        http://${listenHost}:${PORT}/ui
 ${'='.repeat(50)}
 `);
 
@@ -1142,3 +1182,13 @@ process.on('SIGTERM', async () => {
 });
 
 export default server;
+
+process.on('uncaughtException', async (err) => {
+ console.error(err);
+ console.log('Disconnecting axi');
+	try {
+		await axi.disconnect();
+	} catch (e) {
+		// Ignore
+	}
+});

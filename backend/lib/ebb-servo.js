@@ -32,7 +32,7 @@ export const SERVO_CONFIGS = {
     min: 5400,      // 0% position - base for formula: 5400 + 72 * percent
     max: 12600,     // 100% position (5400 + 72*100)
     sweepTime: 70,  // Time to sweep full range at 100% rate (ms)
-    moveMin: 20,    // Minimum move time for non-zero distance (ms)
+   moveMin: 20,    // Minimum move time for non-zero servo up/down distance (ms)
     moveSlope: 1.28, // Additional ms per % of travel
     pwmPeriod: 0.3, // Single channel PWM period
     channels: 1     // Single channel for narrow-band
@@ -166,6 +166,9 @@ export class EBBServo {
       }
     }
 
+    // Detect initial pen state
+    await this._detectPenState();
+
     this.initialized = true;
   }
 
@@ -185,14 +188,29 @@ export class EBBServo {
 
       if (ebblv && ebblv === layerCode) {
         // EBB was previously configured with same settings
-        const penUp = await this.ebb.queryPenUp();
-        this.isUp = penUp;
+        await this.queryHardwareState();
       } else {
         // EBB not configured or different settings - state unknown
         this.isUp = null;
       }
     } catch (e) {
       this.isUp = null;
+    }
+  }
+
+  /**
+   * Query actual pen state from hardware
+   * @returns {Promise<boolean|null>} True if pen is up, false if down, null if error
+   */
+  async queryHardwareState() {
+    try {
+      const status = await this.ebb.queryGeneral();
+      // Bit 1 is pen state: 1 = up, 0 = down
+      this.isUp = !!(status & 0x02);
+      return this.isUp;
+    } catch (e) {
+      console.error('[Servo] Failed to query hardware pen state:', e.message);
+      return null;
     }
   }
 
@@ -212,6 +230,11 @@ export class EBBServo {
    * @returns {Promise<number>} Time taken in ms
    */
   async penUp(options = {}) {
+    // If state unknown, query hardware first
+    if (this.isUp === null || options.sync) {
+      await this.queryHardwareState();
+    }
+
     // Skip if already up
     if (this.isUp === true && !options.force) {
       return 0;
@@ -224,12 +247,15 @@ export class EBBServo {
     console.log(`[Servo] penUp: SP,1,${delay},${this.config.pin}`);
     await this.ebb.command(`SP,1,${delay},${this.config.pin}`);
 
-    // Software delay for long moves (matches pyaxidraw behavior)
-    if (delay > 50) {
-      await this._sleep(delay - 30);
+    // Wait for movement to complete
+    const waitTime = Math.max(0, delay);
+    if (waitTime > 0) {
+      await this._sleep(waitTime);
     }
 
-    this.isUp = true;
+    // Verify state from hardware for reliability
+    await this.queryHardwareState();
+    
     return delay;
   }
 
@@ -239,6 +265,11 @@ export class EBBServo {
    * @returns {Promise<number>} Time taken in ms
    */
   async penDown(options = {}) {
+    // If state unknown, query hardware first
+    if (this.isUp === null || options.sync) {
+      await this.queryHardwareState();
+    }
+
     // Skip if already down
     if (this.isUp === false && !options.force) {
       return 0;
@@ -251,12 +282,15 @@ export class EBBServo {
     console.log(`[Servo] penDown: SP,0,${delay},${this.config.pin}`);
     await this.ebb.command(`SP,0,${delay},${this.config.pin}`);
 
-    // Software delay for long moves
-    if (delay > 50) {
-      await this._sleep(delay - 30);
+    // Wait for movement to complete
+    const waitTime = Math.max(0, delay);
+    if (waitTime > 0) {
+      await this._sleep(waitTime);
     }
 
-    this.isUp = false;
+    // Verify state from hardware for reliability
+    await this.queryHardwareState();
+
     return delay;
   }
 
@@ -265,6 +299,9 @@ export class EBBServo {
    * @returns {Promise<number>} Time taken in ms
    */
   async toggle() {
+    // Always query hardware before toggling to ensure we are in sync
+    await this.queryHardwareState();
+    
     if (this.isUp === false) {
       return this.penUp();
     } else {
