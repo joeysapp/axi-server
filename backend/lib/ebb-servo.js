@@ -7,8 +7,8 @@
 	* Reference: https://evil-mad.github.io/EggBot/ebb.html#SC
 	*
 	* Servo Configurations:
-	* - Standard (penlift=2): Pin B1, 0.82-2.32ms pulse, 200ms sweep
-	* - Narrow-band (penlift=3): Pin B2, 0.45-1.05ms pulse, 70ms sweep
+	* - Standard (penlift=2): Pin B1 (RB1), 0.82-2.32ms pulse, 200ms sweep
+	* - Narrow-band (penlift=3): Pin B2 (RB2), 0.45-1.05ms pulse, 70ms sweep
 	*/
 
 /**
@@ -28,13 +28,13 @@ export const SERVO_CONFIGS = {
 	},
 	// Narrow-band brushless servo (pin B2, upgraded lift motor)
 	narrowBand: {
-		pin: 2,
-		min: 5400,      // 0% position - base for formula: 5400 + 72 * percent
-		max: 12600,     // 100% position (5400 + 72*100)
+		pin: 2,         // Narrow-band servo is on Pin 2 (RB2)
+		min: 5400,      // 0% position: ~0.45ms (5400 * 83.3ns)
+		max: 12600,     // 100% position: ~1.05ms (12600 * 83.3ns)
 		sweepTime: 70,  // Time to sweep full range at 100% rate (ms)
 		moveMin: 20,    // Minimum move time for non-zero servo up/down distance (ms)
 		moveSlope: 1.28, // Additional ms per % of travel
-		pwmPeriod: 0.3, // Single channel PWM period
+		pwmPeriod: 0.03, // 3ms for 1 channel at 3ms each (divided by 100)
 		channels: 1     // Single channel for narrow-band
 	}
 };
@@ -68,8 +68,8 @@ export class EBBServo {
 		this.delayUp = options.delayUp ?? PEN_DEFAULTS.delayUp;
 		this.delayDown = options.delayDown ?? PEN_DEFAULTS.delayDown;
 
-	 // Current state - EBB boards, on boot, are assumed to be up
-		this.isUp = true; // null = unknown, true = up, false = down
+	 // Current state - null means unknown
+		this.isUp = null; 
 		this.initialized = false;
 		this.servoTimeout = options.servoTimeout ?? 60000; // ms before servo power-down
 	}
@@ -105,7 +105,6 @@ export class EBBServo {
 		* @returns {number} Total time in ms
 		*/
 	_calculateMoveTime(distance, rate, extraDelay = 0) {
-		return 59;
 		if (distance < 0.9) {
 			return Math.max(0, extraDelay); // No movement needed
 		}
@@ -128,47 +127,38 @@ export class EBBServo {
 	/**
 		* Initialize servo configuration
 		* Sets position limits and PWM channels
-		*
-		* For narrow-band brushless servo: Based on working setPenlift(3) in modified axidraw.js:
-		* 1. Set positions (SC,5, SC,4) using formula: 5400 + 72 * percent
-		* 2. Set max servo rate (SC,10,65535)
-		* 3. Configure single PWM channel (SC,8,1)
-		*
-		* Returns initial pen state
 		*/
 	async initialize() {
 		console.log(`[Servo] Initializing - narrowBand: ${this.isNarrowBand}, pin: ${this.config.pin}`);
-		console.log(`[Servo] Config: min=${this.config.min}, max=${this.config.max}, channels=${this.config.channels}`);
-		console.log(`[Servo] Positions: up=${this.posUp}% (${this._positionToValue(this.posUp)}), down=${this.posDown}% (${this._positionToValue(this.posDown)})`);
+		
+		// Set pen-up position (SC,4)
+		const upVal = this._positionToValue(this.posUp);
+		console.log(`[Servo] Setting pen-up position: ${upVal} (SC,4)`);
+		await this.ebb.command(`SC,4,${upVal}`);
 
 		// Set pen-down position (SC,5)
-		console.log(`[Servo] Sending: SC,5,${this._positionToValue(this.posDown)}`);
-		await this.ebb.command(`SC,5,${this._positionToValue(this.posDown)}`);
+		const downVal = this._positionToValue(this.posDown);
+		console.log(`[Servo] Setting pen-down position: ${downVal} (SC,5)`);
+		await this.ebb.command(`SC,5,${downVal}`);
 
-		// Set pen-up position (SC,4)
-		console.log(`[Servo] Sending: SC,4,${this._positionToValue(this.posUp)}`);
-		await this.ebb.command(`SC,4,${this._positionToValue(this.posUp)}`);
-
-		// Set maximum servo rate (SC,10,65535)
-		console.log(`[Servo] Sending: SC,10,65535`);
-		await this.ebb.command('SC,10,65535');
+		// Set raising/lowering rates (SC,11, SC,12)
+		const raiseRateVal = this._rateToValue(this.rateRaise);
+		const lowerRateVal = this._rateToValue(this.rateLower);
+		console.log(`[Servo] Setting rates: Raise=${raiseRateVal} (SC,11), Lower=${lowerRateVal} (SC,12)`);
+		await this.ebb.command(`SC,11,${raiseRateVal}`);
+		await this.ebb.command(`SC,12,${lowerRateVal}`);
 
 		// Configure PWM channels (SC,8)
-		console.log(`[Servo] Sending: SC,8,${this.config.channels}`);
+		// Narrow-band uses 1 channel (333Hz), standard uses 8 channels (41.6Hz)
+		console.log(`[Servo] Setting PWM channels: ${this.config.channels} (SC,8)`);
 		await this.ebb.command(`SC,8,${this.config.channels}`);
 
-		// For standard servo only: set rates and timeout
-		if (!this.isNarrowBand) {
-			console.log(`[Servo] Sending: SC,12,${this._rateToValue(this.rateLower)}`);
-			await this.ebb.command(`SC,12,${this._rateToValue(this.rateLower)}`);
-			console.log(`[Servo] Sending: SC,11,${this._rateToValue(this.rateRaise)}`);
-			await this.ebb.command(`SC,11,${this._rateToValue(this.rateRaise)}`);
-
-			if (this.ebb.minVersion('2.6.0')) {
-				await this.ebb.command(`SR,${this.servoTimeout}`);
-			}
+		// Only set SR for standard servo
+		if (!this.isNarrowBand && this.ebb.minVersion('2.6.0')) {
+			await this.ebb.command(`SR,${this.servoTimeout}`);
 		}
-		// We should always be up when the servo starts, but this is logically necessary for now so we don't try to raise on axidraw init
+
+		// Sync initial state from hardware
 		await this.queryHardwareState();
 		this.initialized = true;
 		return this;
@@ -181,9 +171,9 @@ export class EBBServo {
 	async queryHardwareState() {
 		try {
 			const status = await this.ebb.queryGeneral();
-			// True = up, false = down
+			// True = up (bit 4 is 1), false = down (bit 4 is 0)
 			this.isUp = status.pen === true;
-			return;
+			return this.isUp;
 		} catch (e) {
 			console.error('[Servo] Failed to query hardware pen state:', e.message);
 			return null;
@@ -209,18 +199,20 @@ export class EBBServo {
 		const distance = Math.abs(this.posUp - this.posDown);
 		const delay = this._calculateMoveTime(distance, this.rateRaise, this.delayUp);
 
-		// SP command with pin parameter for narrow-band (pin 2 is required)
-		console.log(`[Servo] Calculated penUp: SP,1,${delay},${this.config.pin}`);
+		// SP command with explicit pin
+		console.log(`[Servo] Raising pen: SP,1,${delay},${this.config.pin}`);
 		await this.ebb.command(`SP,1,${delay},${this.config.pin}`);
+		
+		// Update local state
+		this.isUp = true;
 
-		// Wait for movement to complete
-		const waitTime = Math.max(0, delay);
-		if (waitTime > 0) {
+		// Wait for movement to complete (matching official sleep logic)
+		const waitTime = delay;
+		if (waitTime > 50) {
+			await this._sleep(waitTime - 30);
+		} else if (waitTime > 0) {
 			await this._sleep(waitTime);
 		}
-
-		// Verify state from hardware for reliability
-	 // await this.queryHardwareState();
 
 		return delay;
 	}
@@ -244,18 +236,20 @@ export class EBBServo {
 		const distance = Math.abs(this.posUp - this.posDown);
 		const delay = this._calculateMoveTime(distance, this.rateLower, this.delayDown);
 
-		// SP command with pin parameter for narrow-band (pin 2 is required)
-		console.log(`[Servo] Calculated penDown: SP,0,${delay},${this.config.pin}`);
+		// SP command with explicit pin
+		console.log(`[Servo] Lowering pen: SP,0,${delay},${this.config.pin}`);
 		await this.ebb.command(`SP,0,${delay},${this.config.pin}`);
+		
+		// Update local state
+		this.isUp = false;
 
-		// Wait for movement to complete
-		const waitTime = Math.max(0, delay);
-		if (waitTime > 0) {
+		// Wait for movement to complete (matching official sleep logic)
+		const waitTime = delay;
+		if (waitTime > 50) {
+			await this._sleep(waitTime - 30);
+		} else if (waitTime > 0) {
 			await this._sleep(waitTime);
 		}
-
-		// Verify state from hardware for reliability - this may have been too quickly?
-	 // await this.queryHardwareState();
 
 		return delay;
 	}
@@ -265,6 +259,11 @@ export class EBBServo {
 		* @returns {Promise<number>} Time taken in ms
 		*/
 	async toggle() {
+		// Ensure we have current state
+		if (this.isUp === null) {
+			await this.queryHardwareState();
+		}
+		
 		if (this.isUp === false) {
 			return this.penUp();
 		} else {
@@ -289,6 +288,7 @@ export class EBBServo {
 		const position = this._positionToValue(percent);
 		const rateValue = this._rateToValue(rate);
 
+		console.log(`[Servo] Moving to ${percent}%: S2,${position},${this.config.pin},${rateValue},${delay}`);
 		await this.ebb.command(`S2,${position},${this.config.pin},${rateValue},${delay}`);
 
 		if (delay > 50) {
