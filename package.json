@@ -1,32 +1,33 @@
 {
-  "name": "axi-server",
-  "version": "1.0.0",
-  "description": "HTTP REST API server for controlling AxiDraw plotters via direct EBB serial commands",
-  "main": "src/index.js",
-  "type": "module",
-  "scripts": {
-    "start": "node backend/index.js",
-    "dev": "node --watch backend/index.js",
-    "build-ui": "bash scripts/build-ui.sh",
-    "test": "bash scripts/test-endpoints.sh"
-  },
-  "keywords": [
-    "axidraw",
-    "plotter",
-    "eibotboard",
-    "ebb",
-    "serial",
-    "rest-api"
-  ],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "serialport": "^12.0.0",
-    "svg-path-parser": "^1.1.0",
-    "svgson": "^5.3.1",
-    "ws": "^8.19.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+	"name": "axi-lab",
+	"version": "1.1.0",
+	"private": true,
+	"description": "GUI and API for AxiDraw plotters control over serial",
+	"main": "src/index.js",
+	"type": "module",
+	"scripts": {
+		"start": "node backend/index.js",
+		"dev": "node --watch backend/index.js",
+		"build-ui": "bash scripts/build-ui.sh",
+		"test": "bash scripts/test-endpoints.sh"
+	},
+	"keywords": [
+		"axidraw",
+		"plotter",
+		"eibotboard",
+		"ebb",
+		"serial",
+		"rest-api"
+	],
+	"author": "",
+	"license": "MIT",
+	"dependencies": {
+		"serialport": "^12.0.0",
+		"svg-path-parser": "^1.1.0",
+		"svgson": "^5.3.1",
+		"ws": "^8.19.0"
+	},
+	"engines": {
+		"node": ">=18.0.0"
+	}
 }

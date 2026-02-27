@@ -177,17 +177,17 @@ export function setupWebSocketServer(server, axi, config) {
 	async function handleWebSocketMessage(ws, message, path) {
 		const { type } = message;
 
-	 if (type !== 'spatial') {
-	  console.log(message);
-	 }
+		if (type !== 'spatial') {
+			console.log(message);
+		}
 		switch (type) {
 			case 'spatial':
 				spatialProcessor.processSpatialState(message);
 				break;
 
 			case 'button':
-			 spatialProcessor.handleButtonEvent(message.button, message.state);
-			 // It's worth mentioning none of the dualsense commands work - they're pressed with these values but they do nothing here
+				spatialProcessor.handleButtonEvent(message.button, message.state);
+				// It's worth mentioning none of the dualsense commands work - they're pressed with these values but they do nothing here
 				if (message.state === 'pressed') {
 					switch (message.button) {
 						case 'cross':
@@ -221,21 +221,21 @@ export function setupWebSocketServer(server, axi, config) {
 						break;
 					case 'pen_toggle':
 						await axi.penToggle();
-					 // Sync pen state just in case it got out of sync
-					 // But the above await just returned us the value
+						// Sync pen state just in case it got out of sync
+						// But the above await just returned us the value
 						spatialProcessor.penDown = !axi.servo?.isUp;
 						break;
-				case 'pen_sync':
-				 // Is this failing because it's undefined?
+					case 'pen_sync':
+						// Is this failing because it's undefined?
 						const isUp = await axi.syncPenState();
-				 spatialProcessor.penDown = !isUp;
+						spatialProcessor.penDown = !isUp;
 						ws.send(JSON.stringify({
 							type: 'pen_synced',
 							penDown: spatialProcessor.penDown
 						}));
 						break;
-				case 'stop':
-				 // This is working slightly more than 0%, good
+					case 'stop':
+						// This is working slightly more than 0%, good
 						await axi.emergencyStop();
 						break;
 					case 'home':
@@ -278,7 +278,7 @@ export function setupWebSocketServer(server, axi, config) {
 				break;
 
 			case 'motion':
-		case 'touch':
+			case 'touch':
 				break;
 
 			case 'system':
@@ -287,8 +287,8 @@ export function setupWebSocketServer(server, axi, config) {
 				}
 				break;
 
-		case 'config':
-		 // Can we clarify whose config this is for? Axi or spatial
+			case 'config':
+				// Can we clarify whose config this is for? Axi or spatial
 				spatialProcessor.updateConfig(message.config);
 				ws.send(JSON.stringify({
 					type: 'config_updated',
@@ -296,13 +296,13 @@ export function setupWebSocketServer(server, axi, config) {
 				}));
 				break;
 
-		case 'sync':
-		 // This seems eager..
+			case 'sync':
+				// This seems eager..
 				const position = axi.motion?.getPosition();
 				if (position?.mm) {
 					spatialProcessor.syncPosition(position.mm);
 				}
-		 // Like, why would we say this if we don't know what the axi's position even is?
+				// Like, why would we say this if we don't know what the axi's position even is?
 				ws.send(JSON.stringify({
 					type: 'synced',
 					position: spatialProcessor.getState().position

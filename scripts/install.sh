@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# AxiDraw Server Installation Script
+# axi-lab Installation Script
 # Supports macOS and Linux
 #
 
@@ -17,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}======================================${NC}"
-echo -e "${BLUE}  AxiDraw Server Installation${NC}"
+echo -e "${BLUE}  axi-lab Installation${NC}"
 echo -e "${BLUE}======================================${NC}"
 echo ""
 
@@ -114,8 +114,8 @@ case $SERVICE_CHOICE in
             exit 1
         fi
 
-        PLIST_SRC="$PROJECT_DIR/services/com.axidraw.server.plist"
-        PLIST_DST="$HOME/Library/LaunchAgents/com.axidraw.server.plist"
+        PLIST_SRC="$PROJECT_DIR/services/com.axi.lab.plist"
+        PLIST_DST="$HOME/Library/LaunchAgents/com.axi.lab.plist"
 
         # Update paths in plist
         sed -e "s|\$HOME|$HOME|g" \
@@ -129,10 +129,10 @@ case $SERVICE_CHOICE in
         echo -e "${GREEN}Service installed!${NC}"
         echo ""
         echo "Control commands:"
-        echo "  Start:  launchctl start com.axidraw.server"
-        echo "  Stop:   launchctl stop com.axidraw.server"
-        echo "  Reload: launchctl unload ~/Library/LaunchAgents/com.axidraw.server.plist && launchctl load ~/Library/LaunchAgents/com.axidraw.server.plist"
-        echo "  Logs:   tail -f /tmp/axidraw-server.log"
+        echo "  Start:  launchctl start com.axi.lab"
+        echo "  Stop:   launchctl stop com.axi.lab"
+        echo "  Reload: launchctl unload ~/Library/LaunchAgents/com.axi.lab.plist && launchctl load ~/Library/LaunchAgents/com.axi.lab.plist"
+        echo "  Logs:   tail -f /tmp/axi-lab.log"
         ;;
 
     2)
@@ -141,8 +141,8 @@ case $SERVICE_CHOICE in
             exit 1
         fi
 
-        PLIST_SRC="$PROJECT_DIR/services/axidraw-tmux.plist"
-        PLIST_DST="$HOME/Library/LaunchAgents/com.axidraw.tmux.plist"
+        PLIST_SRC="$PROJECT_DIR/services/axi-tmux.plist"
+        PLIST_DST="$HOME/Library/LaunchAgents/com.axi.tmux.plist"
 
         # Update paths in plist
         sed -e "s|\$HOME|$HOME|g" \
@@ -158,7 +158,7 @@ case $SERVICE_CHOICE in
         echo "Control commands:"
         echo "  Attach:  tmux attach -t axi"
         echo "  Detach:  Ctrl+B then D"
-        echo "  Restart: launchctl stop com.axidraw.tmux && launchctl start com.axidraw.tmux"
+        echo "  Restart: launchctl stop com.axi.tmux && launchctl start com.axi.tmux"
         ;;
 
     3)
@@ -167,8 +167,8 @@ case $SERVICE_CHOICE in
             exit 1
         fi
 
-        SERVICE_SRC="$PROJECT_DIR/services/axidraw-server.service"
-        SERVICE_DST="/etc/systemd/system/axidraw-server.service"
+        SERVICE_SRC="$PROJECT_DIR/services/axi-lab.service"
+        SERVICE_DST="/etc/systemd/system/axi-lab.service"
 
         # Update paths in service file
         CURRENT_USER=$(whoami)
@@ -179,17 +179,17 @@ case $SERVICE_CHOICE in
 
         echo "Installing systemd service..."
         sudo systemctl daemon-reload
-        sudo systemctl enable axidraw-server
-        sudo systemctl start axidraw-server
+        sudo systemctl enable axi-lab
+        sudo systemctl start axi-lab
 
         echo -e "${GREEN}Service installed and started!${NC}"
         echo ""
         echo "Control commands:"
-        echo "  Status:  sudo systemctl status axidraw-server"
-        echo "  Start:   sudo systemctl start axidraw-server"
-        echo "  Stop:    sudo systemctl stop axidraw-server"
-        echo "  Restart: sudo systemctl restart axidraw-server"
-        echo "  Logs:    sudo journalctl -u axidraw-server -f"
+        echo "  Status:  sudo systemctl status axi-lab"
+        echo "  Start:   sudo systemctl start axi-lab"
+        echo "  Stop:    sudo systemctl stop axi-lab"
+        echo "  Restart: sudo systemctl restart axi-lab"
+        echo "  Logs:    sudo journalctl -u axi-lab -f"
         ;;
 
     4)
@@ -211,7 +211,7 @@ echo -e "${GREEN}======================================${NC}"
 echo -e "${GREEN}  Installation Complete!${NC}"
 echo -e "${GREEN}======================================${NC}"
 echo ""
-echo "Server URL: http://localhost:9700"
+echo "Lab URL: http://localhost:9700"
 echo "API Docs:   http://localhost:9700/"
 echo "Health:     http://localhost:9700/health"
 echo ""

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# AxiDraw Server Endpoint Test Script
+# Axi Lab Endpoint Test Script
 # Tests all API endpoints via curl
 #
 # Usage:
@@ -92,7 +92,7 @@ skip_test() {
 }
 
 # Check if server is running
-echo -e "${YELLOW}Testing AxiDraw Server at $BASE_URL${NC}"
+echo -e "${YELLOW}Testing Axi Lab at $BASE_URL${NC}"
 echo ""
 
 if ! curl -s "$BASE_URL/health" > /dev/null 2>&1; then

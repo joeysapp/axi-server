@@ -9,7 +9,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>cd $HOME/etc/git/axi-server &amp;&amp; exec /usr/local/bin/node src/index.js</string>
+        <string>cd $HOME/etc/git/axi-lab &amp;&amp; exec /usr/local/bin/node src/index.js</string>
     </array>
 
     <key>EnvironmentVariables</key>
@@ -36,13 +36,13 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/tmp/axidraw-server.log</string>
+    <string>/tmp/axi-lab.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/axidraw-server.error.log</string>
+    <string>/tmp/axi-lab.error.log</string>
 
     <key>WorkingDirectory</key>
-    <string>/Users/zooey/etc/git/axi-server</string>
+    <string>/Users/zooey/etc/git/axi-lab</string>
 
     <key>ThrottleInterval</key>
     <integer>10</integer>
