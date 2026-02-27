@@ -119,11 +119,47 @@ const axi = new AxiDraw({
 });
 
 // Create job queue
+let wsHandler = null;
 const queue = new JobQueue({
-	onJobStart: (job) => console.log(`[Queue] Started: ${job.name}`),
-	onJobComplete: (job) => console.log(`[Queue] Completed: ${job.name}`),
-	onJobFailed: (job, err) => console.log(`[Queue] Failed: ${job.name} - ${err.message}`)
+	onJobStart: (job) => {
+		console.log(`[Queue] Started: ${job.name}`);
+		if (wsHandler) wsHandler.broadcast({ type: 'queue_update', status: queue.getStatus(), jobs: queue.getQueue() });
+	},
+	onJobComplete: (job) => {
+		console.log(`[Queue] Completed: ${job.name}`);
+		if (wsHandler) wsHandler.broadcast({ type: 'queue_update', status: queue.getStatus(), jobs: queue.getQueue() });
+	},
+	onJobFailed: (job, err) => {
+		console.log(`[Queue] Failed: ${job.name} - ${err.message}`);
+		if (wsHandler) wsHandler.broadcast({ type: 'queue_update', status: queue.getStatus(), jobs: queue.getQueue() });
+	},
+	onJobProgress: (job) => {
+		if (wsHandler) wsHandler.broadcast({ type: 'queue_update', status: queue.getStatus(), jobs: queue.getQueue() });
+	},
+	onQueueUpdate: () => {
+		if (wsHandler) wsHandler.broadcast({ type: 'queue_update', status: queue.getStatus(), jobs: queue.getQueue() });
+	}
 });
+
+// Set up AxiDraw listeners
+axi.onPathUpdate = (point, history) => {
+	if (wsHandler) {
+		wsHandler.broadcast({
+			type: 'path_update',
+			point,
+			path: history
+		});
+	}
+};
+
+axi.onStatusUpdate = (status) => {
+	if (wsHandler) {
+		wsHandler.broadcast({
+			type: 'status_update',
+			...status
+		});
+	}
+};
 
 // SVG parser
 const svgParser = new SVGParser();
@@ -893,9 +929,21 @@ async function handleRequest(req, res) {
 				data: body.data,
 				name: body.name,
 				priority: body.priority ?? JobPriority.NORMAL,
+				state: body.state || JobState.PENDING,
 				metadata: body.metadata
 			});
 			sendSuccess(res, { job: job.toJSON() });
+			return;
+		}
+
+		if (method === 'POST' && pathname.startsWith('/queue/') && pathname.endsWith('/accept')) {
+			const id = pathname.split('/')[2];
+			const success = queue.accept(id);
+			if (success) {
+				sendSuccess(res);
+			} else {
+				sendError(res, 'Job not found or not in PLANNED state', 404);
+			}
 			return;
 		}
 
@@ -948,6 +996,7 @@ async function handleRequest(req, res) {
 				data: commands,
 				name: body.name || 'SVG Plot',
 				priority: body.priority ?? JobPriority.NORMAL,
+				state: JobState.PLANNED,
 				metadata: { svgBounds: parser.bounds }
 			});
 			sendSuccess(res, {
@@ -981,6 +1030,7 @@ async function handleRequest(req, res) {
 				data: commands,
 				name: fields.name || svgFile.filename || 'SVG Upload',
 				priority: parseInt(fields.priority || '1', 10),
+				state: JobState.PLANNED,
 				metadata: { svgBounds: parser.bounds, filename: svgFile.filename }
 			});
 			sendSuccess(res, {
@@ -1110,7 +1160,55 @@ SPATIAL PROCESSING
 // Create and start server
 const server = http.createServer(handleRequest);
 
-const wss = setupWebSocketServer(server, axi, { MODEL });
+wsHandler = setupWebSocketServer(server, axi, { MODEL, queue });
+const wss = wsHandler.wss;
+
+// Serial state query polling (low frequency)
+setInterval(async () => {
+	if (axi.ebb && axi.ebb.connected && axi.state === AxiDrawState.READY) {
+		try {
+			const steps = await axi.ebb.querySteps();
+			const voltage = await axi.ebb.queryVoltage();
+			const general = await axi.ebb.queryGeneral();
+			
+			let utility = {};
+			try {
+				// Only query if firmware supports QU (v3.0+)
+				if (axi.ebb.minVersion('3.0.0')) {
+					utility.fifoMax = await axi.ebb.queryUtility(2);
+					utility.fifoSize = await axi.ebb.queryUtility(3);
+					utility.fifoCount = await axi.ebb.queryUtility(6);
+				}
+			} catch (e) {
+				// Ignore if not supported
+			}
+
+			if (wsHandler) {
+				wsHandler.broadcast({
+					type: 'serial_state',
+					ts: Date.now(),
+					steps,
+					power: {
+						current: voltage.current,
+						voltage: voltage.voltage,
+						voltageLow: voltage.voltage < 250
+					},
+					hardware: {
+						penUp: !!(general & 0x02),
+						commandExecuting: !!(general & 0x04),
+						motor1Moving: !!(general & 0x08),
+						motor2Moving: !!(general & 0x10),
+						fifoEmpty: !!(general & 0x20),
+						buttonPressed: !!(general & 0x01)
+					},
+					utility
+				});
+			}
+		} catch (e) {
+			// console.error('[SerialPolling] Error:', e.message);
+		}
+	}
+}, 2000);
 
 server.listen(PORT, HOST, async () => {
 	const listenHost = HOST === '0.0.0.0' ? 'localhost' : HOST;

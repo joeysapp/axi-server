@@ -26,3 +26,6 @@ backend/public/
 
 # Test artifacts
 coverage/
+
+# Misc
+deploy.sh

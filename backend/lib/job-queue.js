@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
  * Job states
  */
 export const JobState = {
+  PLANNED: 'planned',
   PENDING: 'pending',
   RUNNING: 'running',
   PAUSED: 'paused',
@@ -39,7 +40,7 @@ export class Job {
     this.name = options.name || `Job ${this.id.slice(0, 8)}`;
     this.priority = options.priority ?? JobPriority.NORMAL;
     this.data = options.data || null;
-    this.state = JobState.PENDING;
+    this.state = options.state || JobState.PENDING;
     this.progress = 0;
     this.error = null;
 
@@ -77,7 +78,7 @@ export class Job {
     if (!this.data) return null;
 
     if (this.type === 'commands' && Array.isArray(this.data)) {
-      return { commandCount: this.data.length };
+      return { commandCount: this.data.length, commands: this.data };
     }
 
     if (this.type === 'svg') {
@@ -87,7 +88,7 @@ export class Job {
     }
 
     if (this.type === 'path' && Array.isArray(this.data)) {
-      return { pathCount: this.data.length };
+      return { pathCount: this.data.length, path: this.data };
     }
 
     return { type: typeof this.data };
@@ -110,6 +111,7 @@ export class JobQueue {
     this.onJobComplete = options.onJobComplete || null;
     this.onJobFailed = options.onJobFailed || null;
     this.onJobProgress = options.onJobProgress || null;
+    this.onQueueUpdate = options.onQueueUpdate || null;
 
     // Processor function - must be set by the server
     this.processor = options.processor || null;
@@ -132,12 +134,40 @@ export class JobQueue {
     const insertIndex = this._findInsertIndex(job.priority);
     this.queue.splice(insertIndex, 0, job.id);
 
+    // Notify listeners
+    if (this.onQueueUpdate) {
+      this.onQueueUpdate();
+    }
+
     // Start processing if not already
     if (!this.isProcessing && !this.isPaused) {
       this._processNext();
     }
 
     return job;
+  }
+
+  /**
+   * Accept a planned job and move to pending
+   * @param {string} id - Job ID
+   * @returns {boolean} Success
+   */
+  accept(id) {
+    const job = this.jobs.get(id);
+    if (!job || job.state !== JobState.PLANNED) return false;
+
+    job.state = JobState.PENDING;
+
+    // Notify listeners
+    if (this.onQueueUpdate) {
+      this.onQueueUpdate();
+    }
+
+    if (!this.isProcessing && !this.isPaused) {
+      this._processNext();
+    }
+
+    return true;
   }
 
   /**

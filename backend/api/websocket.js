@@ -137,7 +137,9 @@ export function setupWebSocketServer(server, axi, config) {
 			ts: Date.now(),
 			config: spatialProcessor.getConfig(),
 			position: state.position,
-			penDown: spatialProcessor.penDown
+			penDown: spatialProcessor.penDown,
+			queue: config.queue ? config.queue.getStatus() : null,
+			path: axi.pathHistory || []
 		}));
 
 		// Handle incoming messages
@@ -170,6 +172,18 @@ export function setupWebSocketServer(server, axi, config) {
 			wsClients.delete(ws);
 		});
 	});
+
+	/**
+	 * Broadcast a message to all connected clients
+	 */
+	function broadcast(message) {
+		const data = typeof message === 'string' ? message : JSON.stringify(message);
+		for (const client of wsClients) {
+			if (client.readyState === 1) { // WebSocket.OPEN
+				client.send(data);
+			}
+		}
+	}
 
 	/**
 		* Handle WebSocket message
@@ -262,6 +276,12 @@ export function setupWebSocketServer(server, axi, config) {
 					case 'reboot':
 						await axi.reboot();
 						break;
+					case 'motors_on':
+						await axi.motorsOn();
+						break;
+					case 'motors_off':
+						await axi.motorsOff();
+						break;
 				}
 				break;
 
@@ -318,5 +338,5 @@ export function setupWebSocketServer(server, axi, config) {
 		}
 	}
 
-	return wss;
+	return { wss, broadcast };
 }

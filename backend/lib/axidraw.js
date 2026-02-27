@@ -48,6 +48,8 @@ export class AxiDraw {
 
     // Event handlers
     this.onStateChange = options.onStateChange || null;
+    this.onPathUpdate = options.onPathUpdate || null;
+    this.onStatusUpdate = options.onStatusUpdate || null;
 
     // History tracking
     this.history = [];
@@ -77,13 +79,18 @@ export class AxiDraw {
     const movementActions = ['home', 'move_to', 'move', 'line_to', 'pen_up', 'pen_down', 'pen_toggle'];
     if (movementActions.includes(action) && this.motion && this.servo) {
       const pos = this.motion.getPosition().mm;
-      this.pathHistory.push({
+      const point = {
         action,
         x: pos.x,
         y: pos.y,
         penDown: this.servo.isUp === false,
         time: Date.now()
-      });
+      };
+      this.pathHistory.push(point);
+
+      if (this.onPathUpdate) {
+        this.onPathUpdate(point, this.pathHistory);
+      }
     }
   }
 
@@ -92,6 +99,9 @@ export class AxiDraw {
    */
   clearPathHistory() {
     this.pathHistory = [];
+    if (this.onPathUpdate) {
+      this.onPathUpdate(null, this.pathHistory);
+    }
   }
 
   /**
@@ -105,6 +115,14 @@ export class AxiDraw {
     if (this.onStateChange && oldState !== newState) {
       this.onStateChange(newState, oldState, error);
     }
+
+    if (this.onStatusUpdate) {
+      this.onStatusUpdate({
+        state: this.state,
+        error: this.error,
+        oldState
+      });
+    }
   }
 
   /**
@@ -116,7 +134,8 @@ export class AxiDraw {
     this._heartbeatInterval = setInterval(async () => {
       if (this.ebb?.connected) {
         try {
-          await this.ebb.queryGeneral();
+         const status = await this.ebb.queryGeneral();
+		 console.log(`[Heartbeat] ${status}`);
         } catch (e) {
           console.log('[Heartbeat] Connection lost:', e.message);
           this._stopHeartbeat();
@@ -152,7 +171,8 @@ export class AxiDraw {
       this.ebb = new EBBSerial({
         portPath: portPath || this.portPath,
         timeout: 5000,
-        onCommandError: (error, cmd) => {
+       onCommandError: (error, cmd) => {
+        console.log(`[AxiDraw] Command error: ${cmd} ${error}`);
           // Reset servo state to unknown on any command error
           // This prevents stale state causing repeated penUp/penDown calls
           if (this.servo) {
@@ -263,18 +283,21 @@ export class AxiDraw {
       console.log('[Init] Initializing servo...');
       await this.servo.initialize();
 
-      // Enable motors
+     // Enable motors
+     console.log('[Init] Enabling motors....');	 
       const res = this.resolution === 1
         ? MOTOR_RESOLUTION.MICRO_16X
         : MOTOR_RESOLUTION.MICRO_8X;
       await this.motion.enableMotors(res);
 
-      // Raise pen if not already up
-      if (this.servo.isUp !== true) {
+     // Raise pen if not already up
+     if (this.servo.isUp !== true) {
+	  console.log('[Init] [WARN] THIS SHOULD NEVER OCCUR RIGHT? HAVING TO RAISE PEN ON INIT?');
         await this.servo.penUp();
       }
 
-      // Start heartbeat monitoring
+     // Start heartbeat monitoring
+     console.log('[Init] Starting heartbeat.......');	 	 
       this._startHeartbeat();
 
       this._setState(AxiDrawState.READY);
@@ -608,12 +631,12 @@ export class AxiDraw {
         try {
           const qg = await this.ebb.queryGeneral();
           status.hardware = {
-            penUp: !!(qg & 0x02),
-            commandExecuting: !!(qg & 0x04),
-            motor1Moving: !!(qg & 0x08),
-            motor2Moving: !!(qg & 0x10),
-            fifoEmpty: !!(qg & 0x20),
-            buttonPressed: !!(qg & 0x01)
+            penUp: !!(qg & 0x10),
+            commandExecuting: !!(qg & 0x08),
+            motor1Moving: !!(qg & 0x04),
+            motor2Moving: !!(qg & 0x02),
+            fifoFull: !!(qg & 0x01),
+            buttonPressed: !!(qg & 0x20)
           };
         } catch (e) {
           // Ignore query errors

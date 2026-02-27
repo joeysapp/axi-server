@@ -44,6 +44,23 @@ AXIDRAW_PORT=9700 AXIDRAW_NARROW_BAND=false npm start
 - `POST /svg` - Draw SVG
 - `POST /queue` - Queue commands
 
+## EBB Serial Roadmap
+
+The goal is to build out comprehensive logic around low-level serial commands to maintain and synchronize the AxiDraw's logical state with its actual physical state.
+
+### Priority 1: Physical vs Logical State Synchronization
+- **State Recovery on Boot/Reset:** Implement logic to query `QS` (Query Step) and `QE` (Query Motors) on connection to determine if the AxiDraw has lost its home position.
+- **Boot/Shutdown/Reset Care:** Handle transition states (connect/disconnect/reboot) gracefully by asserting known values and querying hardware before assuming position.
+- **Home Position Assertion:** Develop a protocol for "confirming" home, potentially using `QB` (Query Button) or limit switches if available, to prevent the "AxiDraw thinks it is at 0,0 but is actually at 100,100" scenario.
+
+### Priority 2: FIFO and Buffer Health Monitoring
+- **Real-time FIFO Querying:** Use `QU,3` and `QU,6` to monitor the motion buffer during active jobs to prevent underruns or overflows.
+- **Dynamic Speed/Damping Adjustments:** Use `CU` commands to optimize the AxiDraw's own movement planning based on current job complexity.
+
+### Priority 3: Advanced Predictive Algorithms
+- **Predictive Positioning:** Use `QS` during active movement to refine the frontend's 3D visualization, providing a "live" position that accounts for serial latency.
+- **Health Diagnostics:** Monitor `QC` (Query Voltage) and `QU,4` (Stack High Water) to alert the user of potential hardware power issues or firmware instability before a job fails.
+
 ## Backend and Frontend Spatial States
 ### Coordinate System
 - **AxiDraw Surface**: Represented as a 2D plane in 3D space.

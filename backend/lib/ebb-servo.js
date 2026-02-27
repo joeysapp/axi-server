@@ -132,6 +132,8 @@ export class EBBServo {
    * 1. Set positions (SC,5, SC,4) using formula: 5400 + 72 * percent
    * 2. Set max servo rate (SC,10,65535)
    * 3. Configure single PWM channel (SC,8,1)
+   *
+   * Returns initial pen state
    */
   async initialize() {
     console.log(`[Servo] Initializing - narrowBand: ${this.isNarrowBand}, pin: ${this.config.pin}`);
@@ -167,9 +169,10 @@ export class EBBServo {
     }
 
     // Detect initial pen state
-    await this._detectPenState();
+    const state = await this._detectPenState();
 
-    this.initialized = true;
+   this.initialized = true;
+   return state;
   }
 
   /**
@@ -205,8 +208,8 @@ export class EBBServo {
   async queryHardwareState() {
     try {
       const status = await this.ebb.queryGeneral();
-      // Bit 1 is pen state: 1 = up, 0 = down
-      this.isUp = !!(status & 0x02);
+      // Bit 4 is pen state: 1 = up, 0 = down
+      this.isUp = !!(status & 0x10);
       return this.isUp;
     } catch (e) {
       console.error('[Servo] Failed to query hardware pen state:', e.message);
