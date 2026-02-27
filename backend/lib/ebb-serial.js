@@ -493,13 +493,34 @@ export class EBBSerial {
 	}
 
 	/**
-	 * Query general status (QG command) - returns hex status byte. All states are 1 if the thing is doing something, 0 if idle.
-	 * Bits: 0=FIFO (1=fifo not empty,0=fifo empty), 1=MTR2 (1=moving, 0=not), 2=MTR1 (1=moving, 0=not), 3=CMD, 4=PEN (1=up,0=down), 5=PRG, 6=Power, 7=Limit
-		* @returns {Promise<number>} Status byte
+		* Query general status (QG command) - returns a structured object of status bits.
+		* All states are true if the thing is doing something/active, false if idle.
+		* 
+		* Bits:
+		* 7: Limit Switch Triggered
+		* 6: Power Lost Flag
+		* 5: PRG (Button)
+		* 4: PEN (1=Up, 0=Down)
+		* 3: CMD (Command executing)
+		* 2: MTR1 (Motor 1 moving)
+		* 1: MTR2 (Motor 2 moving)
+		* 0: FIFO (FIFO not empty)
+		* 
+		* @returns {Promise<Object>} Status object
 		*/
 	async queryGeneral() {
 		const response = await this.query('QG');
-		return parseInt(response, 16);
+		const status = parseInt(response, 16);
+		return {
+			limit: !!(status & 0x80),
+			power: !!(status & 0x40),
+			prg: !!(status & 0x20),
+			pen: !!(status & 0x10), // true = Up, false = Down
+			cmd: !!(status & 0x08),
+			mtr1: !!(status & 0x04),
+			mtr2: !!(status & 0x02),
+			fifo: !!(status & 0x01)
+		};
 	}
 
 	/**
@@ -514,14 +535,8 @@ export class EBBSerial {
 		while (Date.now() - startTime < maxWaitMs) {
 			try {
 				const status = await this.queryGeneral();
-				// Check bits 3 (command executing), 2 (motor1), 1 (motor2)
-				// Bit 0 (FIFO status) should be 0 when FIFO is empty
-				const commandExecuting = !!(status & 0x08);
-				const motor1Moving = !!(status & 0x04);
-				const motor2Moving = !!(status & 0x02);
-				const fifoBusy = !!(status & 0x01);
-
-				if (!commandExecuting && !motor1Moving && !motor2Moving && !fifoBusy) {
+				// Check cmd, mtr1, mtr2, and fifo bits
+				if (!status.cmd && !status.mtr1 && !status.mtr2 && !status.fifo) {
 					return true; // Idle
 				}
 			} catch (e) {

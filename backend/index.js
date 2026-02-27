@@ -302,6 +302,7 @@ const API_DOCS = {
 		'POST /speed': 'Set speed settings - body: { penDown?: number, penUp?: number } (inches/sec)',
 		'POST /motors/on': 'Enable motors',
 		'POST /motors/off': 'Disable motors',
+		'POST /zero': 'Reset zero point (logical home) by disabling and re-enabling motors',
 		'POST /stop': 'Emergency stop',
 
 		// Queue
@@ -774,7 +775,7 @@ async function handleRequest(req, res) {
 				return;
 			}
 
-			await axi.move(body.dx, body.dy, units);
+			await axi.move(body.dx, body.dy, units, { force: body.force });
 			sendSuccess(res, { position: axi.motion?.getPosition() });
 			return;
 		}
@@ -785,7 +786,7 @@ async function handleRequest(req, res) {
 				sendError(res, 'Missing x or y parameters');
 				return;
 			}
-			await axi.moveTo(body.x, body.y, body.units || 'mm');
+			await axi.moveTo(body.x, body.y, body.units || 'mm', { rate: body.rate, force: body.force });
 			sendSuccess(res, { position: axi.motion?.getPosition() });
 			return;
 		}
@@ -806,7 +807,7 @@ async function handleRequest(req, res) {
 				return;
 			}
 
-			await axi.lineTo(body.dx, body.dy, units);
+			await axi.lineTo(body.dx, body.dy, units, { force: body.force });
 			sendSuccess(res, { position: axi.motion?.getPosition() });
 			return;
 		}
@@ -899,6 +900,12 @@ async function handleRequest(req, res) {
 
 		if (method === 'POST' && pathname === '/motors/off') {
 			await axi.motorsOff();
+			sendSuccess(res);
+			return;
+		}
+
+		if (method === 'POST' && pathname === '/zero') {
+			await axi.zero();
 			sendSuccess(res);
 			return;
 		}
@@ -1163,21 +1170,33 @@ const server = http.createServer(handleRequest);
 wsHandler = setupWebSocketServer(server, axi, { MODEL, queue });
 const wss = wsHandler.wss;
 
+// Global cache for static hardware info
+let cachedFifoMax = null;
+
 // Serial state query polling (low frequency)
 setInterval(async () => {
 	if (axi.ebb && axi.ebb.connected && axi.state === AxiDrawState.READY) {
 		try {
 			const steps = await axi.ebb.querySteps();
 			const voltage = await axi.ebb.queryVoltage();
-			const general = await axi.ebb.queryGeneral();
+			const general = await axi.ebb.queryGeneral(); // Now returns structured object
 			
 			let utility = {};
 			try {
 				// Only query if firmware supports QU (v3.0+)
 				if (axi.ebb.minVersion('3.0.0')) {
-					utility.fifoMax = await axi.ebb.queryUtility(2);
-					utility.fifoSize = await axi.ebb.queryUtility(3);
-					utility.fifoCount = await axi.ebb.queryUtility(6);
+          // QU,2 is static, only query once or on connection
+          if (cachedFifoMax === null) {
+            cachedFifoMax = await axi.ebb.queryUtility(2);
+          }
+					utility.fifoMax = cachedFifoMax;
+
+          // Only query FIFO status if things are moving or if we need a fresh status
+          const isMoving = general.mtr1 || general.mtr2 || general.cmd;
+          if (isMoving || Math.random() < 0.1) { // Poll occasionally even when idle
+            utility.fifoSize = await axi.ebb.queryUtility(3);
+            utility.fifoCount = await axi.ebb.queryUtility(6);
+          }
 				}
 			} catch (e) {
 				// Ignore if not supported
@@ -1193,14 +1212,7 @@ setInterval(async () => {
 						voltage: voltage.voltage,
 						voltageLow: voltage.voltage < 250
 					},
-					hardware: {
-						penUp: !!(general & 0x02),
-						commandExecuting: !!(general & 0x04),
-						motor1Moving: !!(general & 0x08),
-						motor2Moving: !!(general & 0x10),
-						fifoEmpty: !!(general & 0x20),
-						buttonPressed: !!(general & 0x01)
-					},
+					hardware: general,
 					utility
 				});
 			}
@@ -1243,7 +1255,8 @@ ${'='.repeat(50)}
 // Graceful shutdown
 process.on('SIGINT', async () => {
 	console.log('\n[Shutdown] Received SIGINT, shutting down...');
-	try {
+ try {
+  await axi.penUp();
 		await axi.disconnect();
 	} catch (e) {
 		// Ignore
