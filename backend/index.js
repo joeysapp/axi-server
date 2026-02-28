@@ -262,7 +262,8 @@ const API_DOCS = {
 		'GET /ui': 'Web control panel - mobile-friendly UI for testing and demos',
 
 		// Status & Info
-		'GET /': 'API documentation (this page)',
+		'GET /': 'Splash page with live client count',
+		'GET /api': 'API documentation (this page)',
 		'GET /info': 'API documentation as JSON',
 		'GET /health': 'Health check - returns server and connection status',
 		'GET /status': 'Detailed AxiDraw status including position, servo state, etc.',
@@ -385,6 +386,108 @@ function sendError(res, message, status = 400) {
 
 function sendSuccess(res, data = {}) {
 	sendJSON(res, { success: true, ...data });
+}
+
+/**
+ * Render the splash/landing page with dynamic OG meta (live client count)
+ */
+function renderSplashPage(origin, clientCount) {
+	const liveLabel = clientCount > 0 ? `${clientCount} connected now` : 'offline';
+	const title = 'axi-lab';
+	const description = 'Multiplayer pen plotter control. Steer an AxiDraw in real-time from your browser — see other pilots\' cursors on a shared 3D canvas.';
+	const ogDescription = `${description} ${clientCount > 0 ? `${clientCount} pilot${clientCount !== 1 ? 's' : ''} connected right now.` : ''}`.trim();
+
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<meta name="description" content="${description}">
+
+<!-- OpenGraph -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="${origin}/">
+<meta property="og:title" content="${title}">
+<meta property="og:description" content="${ogDescription}">
+<meta property="og:image" content="${origin}/og-image.png">
+<meta property="og:image:width" content="939">
+<meta property="og:image:height" content="939">
+<meta property="og:image:type" content="image/png">
+<meta property="og:site_name" content="axi-lab">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${title}">
+<meta name="twitter:description" content="${ogDescription}">
+<meta name="twitter:image" content="${origin}/og-image.png">
+
+<!-- Favicon -->
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; background: #0a0a0a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+.splash {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 100vh; min-height: 100dvh; padding: 24px; gap: 32px;
+}
+.splash a { text-decoration: none; color: inherit; }
+.image-wrap {
+  position: relative; cursor: pointer;
+  width: min(70vw, 70vh, 420px); height: min(70vw, 70vh, 420px);
+  transition: transform 0.3s ease;
+}
+.image-wrap:hover { transform: scale(1.02); }
+.image-wrap img {
+  width: 100%; height: 100%; object-fit: contain;
+  border-radius: 16px;
+  filter: drop-shadow(0 0 40px rgba(78, 204, 163, 0.15));
+}
+.meta { text-align: center; display: flex; flex-direction: column; gap: 8px; }
+h1 { font-size: 20px; font-weight: 600; letter-spacing: 3px; color: #4ecca3; text-transform: uppercase; }
+.tagline { font-size: 14px; color: #777; max-width: 360px; line-height: 1.5; }
+.live {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 500; letter-spacing: 1px; color: #888;
+  text-transform: uppercase;
+}
+.dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: ${clientCount > 0 ? '#4ecca3' : '#555'};
+  ${clientCount > 0 ? 'box-shadow: 0 0 8px #4ecca3; animation: pulse 2s infinite;' : ''}
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.enter {
+  font-size: 13px; font-weight: 600; letter-spacing: 2px; color: #4ecca3;
+  padding: 12px 32px; border: 1px solid rgba(78, 204, 163, 0.25);
+  border-radius: 100px; cursor: pointer; text-transform: uppercase;
+  transition: all 0.2s ease; background: transparent; text-decoration: none;
+}
+.enter:hover { background: rgba(78, 204, 163, 0.08); border-color: rgba(78, 204, 163, 0.5); }
+</style>
+</head>
+<body>
+<div class="splash">
+  <a href="/ui" class="image-wrap">
+    <img src="/og-image.png" alt="axi-lab" width="939" height="939">
+  </a>
+  <div class="meta">
+    <h1>axi-lab</h1>
+    <p class="tagline">Multiplayer pen plotter control — steer an AxiDraw in real-time, together</p>
+    <div class="live"><span class="dot"></span> ${liveLabel}</div>
+  </div>
+  <a href="/ui" class="enter">Enter</a>
+</div>
+</body>
+</html>`;
 }
 
 async function parseBody(req) {
@@ -578,8 +681,22 @@ async function handleRequest(req, res) {
 			// Fall through to 404 if not found
 		}
 
-		// ==================== Status & Info ====================
+		// ==================== Splash Page ====================
 		if (method === 'GET' && pathname === '/') {
+			const clientCount = wsHandler ? wsHandler.getClientCount() : 0;
+			const host = req.headers.host || 'axi.joeys.app';
+			const origin = `https://${host}`;
+			res.writeHead(200, {
+				'Content-Type': 'text/html',
+				'Access-Control-Allow-Origin': '*',
+				'Cache-Control': 'no-cache'
+			});
+			res.end(renderSplashPage(origin, clientCount));
+			return;
+		}
+
+		// ==================== Status & Info ====================
+		if (method === 'GET' && pathname === '/api') {
 			// Return docs as formatted text
 			res.writeHead(200, {
 				'Content-Type': 'text/plain',

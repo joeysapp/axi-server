@@ -3,7 +3,7 @@
 	"version": "1.1.0",
 	"private": true,
 	"description": "GUI and API for AxiDraw plotters control over serial",
-	"main": "src/index.js",
+	"main": "backend/index.js",
 	"type": "module",
 	"scripts": {
 		"start": "node backend/index.js",

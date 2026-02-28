@@ -6,6 +6,13 @@ import { WebSocketServer } from 'ws';
 import { SpatialProcessor } from '../lib/spatial-processor.js';
 import { AXIDRAW_MODELS, AxiDrawState } from '../lib/axidraw.js';
 
+const CLIENT_COLORS = [
+	'#4ecca3', '#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff',
+	'#ff6fff', '#ff9f43', '#00d2d3', '#c44dff', '#ff4d6d',
+];
+
+let clientIdCounter = 0;
+
 export function setupWebSocketServer(server, axi, config) {
 	const { MODEL } = config;
 
@@ -15,8 +22,11 @@ export function setupWebSocketServer(server, axi, config) {
 	// Spatial processor instance (created per connection or shared)
 	let spatialProcessor = null;
 
-	// Track connected WebSocket clients
-	const wsClients = new Set();
+	// Track connected WebSocket clients: Map<clientId, { ws, id, name, color, cursor, joinedAt }>
+	const wsClients = new Map();
+
+	// Who currently controls the AxiDraw (null = uncontrolled)
+	let controllerId = null;
 
 	/**
 		* Initialize spatial processor with AxiDraw integration
@@ -50,7 +60,7 @@ export function setupWebSocketServer(server, axi, config) {
 			networkLatency: 15,
 			// We accumulate momvemnts until we have over half of a mm..
 			// .. so this slightly reduces the sound, but it does reduce responsiveness too..
-			// movementThreshold:0.1,		 
+			// movementThreshold:0.1,
 			movementThreshold: 0.0001,
 
 			// Movement callback - send to AxiDraw
@@ -87,9 +97,9 @@ export function setupWebSocketServer(server, axi, config) {
 					penDown: spatialProcessor.penDown
 				});
 
-				for (const client of wsClients) {
-					if (client.readyState === 1) { // WebSocket.OPEN
-						client.send(message);
+				for (const client of wsClients.values()) {
+					if (client.ws.readyState === 1) { // WebSocket.OPEN
+						client.ws.send(message);
 					}
 				}
 			}
@@ -102,6 +112,50 @@ export function setupWebSocketServer(server, axi, config) {
 		}
 
 		return spatialProcessor;
+	}
+
+	/**
+	 * Transfer control of the AxiDraw to a new client (or release it)
+	 */
+	async function transferControl(newControllerId) {
+		const previousId = controllerId;
+		controllerId = newControllerId;
+
+		console.log(`[Control] ${previousId || 'none'} -> ${newControllerId || 'none'}`);
+
+		// If releasing control (no new controller), lift pen for safety
+		if (!newControllerId && spatialProcessor?.penDown) {
+			try {
+				await axi.penUp();
+				spatialProcessor.penDown = false;
+			} catch (e) {
+				console.error('[Control] Failed to lift pen on release:', e.message);
+			}
+		}
+
+		broadcast({
+			type: 'control_changed',
+			controllerId: newControllerId,
+			previousControllerId: previousId,
+		});
+	}
+
+	/**
+	 * Get a serializable list of all connected clients (excluding one)
+	 */
+	function getClientList(excludeId = null) {
+		const clients = [];
+		for (const client of wsClients.values()) {
+			if (client.id !== excludeId) {
+				clients.push({
+					id: client.id,
+					name: client.name,
+					color: client.color,
+					cursor: client.cursor,
+				});
+			}
+		}
+		return clients;
 	}
 
 	/**
@@ -118,7 +172,20 @@ export function setupWebSocketServer(server, axi, config) {
 			return;
 		}
 
-		wsClients.add(ws);
+		// Assign client identity
+		clientIdCounter++;
+		const clientId = `client_${clientIdCounter}`;
+		const clientColor = CLIENT_COLORS[(clientIdCounter - 1) % CLIENT_COLORS.length];
+		const clientInfo = {
+			ws,
+			id: clientId,
+			name: clientId,
+			color: clientColor,
+			cursor: null,
+			joinedAt: Date.now(),
+		};
+
+		wsClients.set(clientId, clientInfo);
 
 		// Initialize spatial processor on first connection
 		if (!spatialProcessor) {
@@ -130,17 +197,37 @@ export function setupWebSocketServer(server, axi, config) {
 			spatialProcessor.start();
 		}
 
-		// Send initial state
+		// Send initial state to this client
 		const state = spatialProcessor.getState();
 		ws.send(JSON.stringify({
 			type: 'connected',
 			ts: Date.now(),
+			clientId,
+			color: clientColor,
+			controllerId,
+			clients: getClientList(clientId),
 			config: spatialProcessor.getConfig(),
 			position: state.position,
 			penDown: spatialProcessor.penDown,
 			queue: config.queue ? config.queue.getStatus() : null,
 			path: axi.pathHistory || []
 		}));
+
+		// Broadcast join to everyone else
+		broadcastExcept(clientId, {
+			type: 'client_joined',
+			client: {
+				id: clientId,
+				name: clientInfo.name,
+				color: clientColor,
+				cursor: null,
+			}
+		});
+
+		console.log(`[WebSocket] Client ${clientId} connected (${wsClients.size} total)`);
+
+		// New client takes control
+		transferControl(clientId);
 
 		// Handle incoming messages
 		ws.on('message', (data) => {
@@ -149,7 +236,7 @@ export function setupWebSocketServer(server, axi, config) {
 				if (process.env.AXIDRAW_DEBUG) {
 					console.log(`[WS RECV] ${new Date().toISOString()} ${JSON.stringify(message)}`);
 				}
-				handleWebSocketMessage(ws, message, path);
+				handleWebSocketMessage(ws, message, path, clientId);
 			} catch (e) {
 				console.error('[WebSocket] Parse error:', e.message);
 				ws.send(JSON.stringify({ type: 'error', error: 'Invalid JSON' }));
@@ -158,8 +245,16 @@ export function setupWebSocketServer(server, axi, config) {
 
 		// Handle disconnect
 		ws.on('close', () => {
-			console.log('[WebSocket] Client disconnected');
-			wsClients.delete(ws);
+			console.log(`[WebSocket] Client ${clientId} disconnected`);
+			wsClients.delete(clientId);
+
+			// Broadcast leave to remaining clients
+			broadcast({ type: 'client_left', clientId });
+
+			// If the controller disconnected, release control
+			if (controllerId === clientId) {
+				transferControl(null);
+			}
 
 			// Stop processor if no clients connected
 			if (wsClients.size === 0 && spatialProcessor) {
@@ -169,7 +264,12 @@ export function setupWebSocketServer(server, axi, config) {
 
 		ws.on('error', (err) => {
 			console.error('[WebSocket] Error:', err.message);
-			wsClients.delete(ws);
+			wsClients.delete(clientId);
+			broadcast({ type: 'client_left', clientId });
+
+			if (controllerId === clientId) {
+				transferControl(null);
+			}
 		});
 	});
 
@@ -178,28 +278,49 @@ export function setupWebSocketServer(server, axi, config) {
 	 */
 	function broadcast(message) {
 		const data = typeof message === 'string' ? message : JSON.stringify(message);
-		for (const client of wsClients) {
-			if (client.readyState === 1) { // WebSocket.OPEN
-				client.send(data);
+		for (const client of wsClients.values()) {
+			if (client.ws.readyState === 1) { // WebSocket.OPEN
+				client.ws.send(data);
 			}
 		}
 	}
 
 	/**
+	 * Broadcast a message to all connected clients except one
+	 */
+	function broadcastExcept(excludeId, message) {
+		const data = typeof message === 'string' ? message : JSON.stringify(message);
+		for (const client of wsClients.values()) {
+			if (client.id !== excludeId && client.ws.readyState === 1) {
+				client.ws.send(data);
+			}
+		}
+	}
+
+	/**
+	 * Check if the given client is the current controller
+	 */
+	function isController(clientId) {
+		return clientId === controllerId;
+	}
+
+	/**
 		* Handle WebSocket message
 		*/
-	async function handleWebSocketMessage(ws, message, path) {
+	async function handleWebSocketMessage(ws, message, path, clientId) {
 		const { type } = message;
 
-		if (type !== 'spatial') {
+		if (type !== 'spatial' && type !== 'client_cursor') {
 			console.log(message);
 		}
 		switch (type) {
 			case 'spatial':
+				if (!isController(clientId)) return;
 				spatialProcessor.processSpatialState(message);
 				break;
 
 			case 'button':
+				if (!isController(clientId)) return;
 				spatialProcessor.handleButtonEvent(message.button, message.state);
 				// It's worth mentioning none of the dualsense commands work - they're pressed with these values but they do nothing here
 				if (message.state === 'pressed') {
@@ -225,6 +346,7 @@ export function setupWebSocketServer(server, axi, config) {
 				break;
 
 			case 'event':
+				if (!isController(clientId)) return;
 				spatialProcessor.handleActionEvent(message.action);
 				switch (message.action) {
 					case 'pen_down':
@@ -286,6 +408,7 @@ export function setupWebSocketServer(server, axi, config) {
 				break;
 
 			case 'dpad':
+				if (!isController(clientId)) return;
 				if (message.state === 'pressed') {
 					const step = 5;
 					switch (message.direction) {
@@ -302,12 +425,14 @@ export function setupWebSocketServer(server, axi, config) {
 				break;
 
 			case 'system':
+				if (!isController(clientId)) return;
 				if (message.action === 'pause') {
 					spatialProcessor.stop();
 				}
 				break;
 
 			case 'config':
+				if (!isController(clientId)) return;
 				// Can we clarify whose config this is for? Axi or spatial
 				spatialProcessor.updateConfig(message.config);
 				ws.send(JSON.stringify({
@@ -317,6 +442,7 @@ export function setupWebSocketServer(server, axi, config) {
 				break;
 
 			case 'sync':
+				if (!isController(clientId)) return;
 				// This seems eager..
 				const position = axi.motion?.getPosition();
 				if (position?.mm) {
@@ -333,10 +459,42 @@ export function setupWebSocketServer(server, axi, config) {
 				ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
 				break;
 
+			case 'client_cursor': {
+				const client = wsClients.get(clientId);
+				if (client) {
+					client.cursor = message.cursor;
+				}
+				broadcastExcept(clientId, {
+					type: 'client_cursor',
+					clientId,
+					cursor: message.cursor,
+				});
+				break;
+			}
+
+			case 'client_name': {
+				const client = wsClients.get(clientId);
+				if (client) {
+					client.name = message.name;
+				}
+				broadcast({
+					type: 'client_updated',
+					clientId,
+					name: message.name,
+					color: client?.color,
+				});
+				break;
+			}
+
 			default:
 				console.log(`[WebSocket] Unknown message type: ${type}`);
 		}
 	}
 
-	return { wss, broadcast };
+	return {
+		wss,
+		broadcast,
+		getClientCount: () => wsClients.size,
+		getClients: () => getClientList(),
+	};
 }

@@ -1,0 +1,459 @@
+:root {
+  //  [ref] https://web.dev/articles/color-scheme
+  //  The page supports both dark and light color schemes, and the page author prefers dark.
+  color-scheme: dark light;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Oxygen, Ubuntu, Helvetica, Aria, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  // font-size: 16px; // Mobile-friendly base size - set in breakpoints.
+  // line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  // cursor: url("data:image/svg+xml;utf8, <svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' style='font-size: 64px'><text y='50'>🌛</text></svg>"), auto;
+  // overflow: hidden;
+}
+html, body, #js-dashboard {
+}
+
+:root {
+  // https://github.com/sw-yx/spark-joy#pure-css-tricks
+  // @media
+  //  (prefers-reduced-motion: no-preference) {
+  //   :focus {
+  //     transition: outline-offset .25s ease;
+  //     outline-offset: 5px;
+  //   }
+  // }
+
+  // https://www.color-hex.com/color-palettes/popular.php
+  // https://sass-lang.com/documentation/values/maps/
+// foxy
+$primary: #f4b00f;
+$secondary: #004fff;
+// $primary: #c5e7fd
+// $primary: #faa996
+// $primary: #e9fef6
+// $primary: #50cceb
+
+  // $primary: hsl(150, 100%, 50%);
+  // Blues
+  // $primary: rgb(53, 110, 244);
+  
+  // $secondary: rgb(204, 153, 102);
+  // Neon pink/red:
+  // $primary: rgb(244, 53, 110);  
+  // $secondary: rgb(244, 53, 110);
+  
+  // Muted orange/red:
+  // $primary: rgb(204, 153, 102);
+  // $secondary: rgb(204, 153, 102);
+  
+  // Yellow:
+  // $primary: rgb(255, 204, 0);
+  // $secondary: rgb(255, 204, 0);
+  // Yellow matching^:
+  // $secondary: rgb(151, 130, 54);
+  
+  // Green:
+  // $secondary: hsl(93, 255%, 38%);  
+  $colors: (
+    'black': black,
+    'white': white,
+    'transparent': transparent,
+
+    'teal': hsl(155, 100%, 50%),
+    'purple': hsl(255, 100%, 50%),
+    'red': hsl(3, 255%, 52%),
+    'orange': hsl(33, 100%, 50%),
+    'yellow': hsl(63, 100%, 70%),
+    'green':    hsl(93, 255%, 38%),
+    'green-sm': hsla(93, 255%, 75%),
+    // 'blue': hsl(200, 255%, 46%),
+    // 'blue-lt': hsla(200, 255%, 46%, 10%),
+    'blue': rgba(53, 110, 244, 100%),
+    'blue-lt': rgba(53, 110, 244, 10%),
+    
+    'primary': $primary,
+    'secondary': $secondary,
+    // 'cyan': #5AA7CB,
+    // 'cyan-lt': #5AA7CB,
+    'success': hsl(93, 80%, 42%)
+  );
+
+  @mixin color-class-generator() {
+    @each $name, $value in $colors {
+      --#{$name}: #{$value};
+      .bg-#{$name}     { background-color: #{$value}; };
+      .border-#{$name} { border-color: #{$value}; };
+      .text-#{$name}   { color: #{$value}; };
+      .btn-#{$name}   { background-color: #{$value}; };
+      // .#{$name}        { border-color: #{$value}; color: #{$value}; };
+    }
+  }
+  @include color-class-generator();
+
+  @mixin rgb-var-generator() {
+    @for $p from 0 through 255 {
+      --rgb-#{$p}: rgb(#{$p}, #{$p}, #{$p});
+      .bg-#{$p} { background-color: rgb($p, $p, $p) !important; }
+      .border-#{$p} { border-color: rgb($p, $p, $p); }
+    }
+  }
+  @include rgb-var-generator();
+
+  @mixin class-generator($classname, $num:1, $unit:1px, $scale:4, $args:'') {
+// Important: this is a typeless computation, so have the scl be eg 4px.
+    #{$classname}: calc($num * $scale * $unit) #{$args};
+  }
+
+  @mixin unit-class-generator() {
+    @for $i from 0 through 64 {
+
+       // --#{$i}: calc(#{$i} * var(--unit) * var(--scalar) * 1px);
+       //--v#{$i}: calc(#{$i} * var(--unit) * var(--scalar) * 1px);
+
+      // Uh, these are ending up with like, h-8: 16px. Right?
+      // .h-#{$i}  { @include class-generator(height,          $i, var(--scalarY), '!important'); }
+      // .w-#{$i}  { @include class-generator(width,           $i, var(--scalarX), '!important'); }
+
+      // .r-pixel-#{$i}  { @include class-generator(border-radius,   $i, var(--scalar),  '!important'); }
+
+      // .bw-#{$i} { border-width: calc(#{$i} * var(--unit) * var(--scalar) * 1px) !important; }
+
+      // if unit is 4px, icon-0: 4, icon-8: 32, icon-16: 64, icon-32: 128
+      // .w-pixel-#{$i}, .w-pix-#{$i}, .w-px-#{$i} {
+      //   @include class-generator(width,        $i, var(--scalar),  '!important');
+      //   @include class-generator(min-width,    $i, var(--scalar),  '!important');
+      //   @include class-generator(max-width,    $i, var(--scalar),  '!important');
+      // }
+      // .h-pixel-#{$i}, .h-pix-#{$i}, .h-px-#{$i} {
+      //   @include class-generator(height   ,    $i, var(--scalar),  '!important'); 
+      //   @include class-generator(min-height,    $i, var(--scalar),  '!important');
+      //   @include class-generator(max-height,    $i, var(--scalar),  '!important');
+      // }
+
+      .m-#{$i}  { @include class-generator(margin,          $i, 1px, var(--scale),              ); }
+      select.m-#{$i}  { @include class-generator(margin,    $i, 1px, var(--scale),   '!important'); }
+      .mt-#{$i} { @include class-generator(margin-top,      $i, 1px, var(--scaleY), '!important'); }
+      .ms-#{$i} { @include class-generator(margin-left,     $i, 1px, var(--scaleX), '!important'); }
+      .mb-#{$i} { @include class-generator(margin-bottom,   $i, 1px, var(--scaleY), '!important'); }
+      .me-#{$i} { @include class-generator(margin-right,    $i, 1px, var(--scaleX), '!important'); }
+
+      .p-#{$i}  { @include class-generator(padding,         $i, 1px, var(--scale)               ); }
+      select.p-#{$i}  { @include class-generator(padding,   $i, 1px, var(--scale),  '!important'); }
+      .pt-#{$i} { @include class-generator(padding-top,     $i, 1px, var(--scaleY), '!important'); }
+      .ps-#{$i} { @include class-generator(padding-left,    $i, 1px, var(--scaleX), '!important'); }
+      .pb-#{$i} { @include class-generator(padding-bottom,  $i, 1px, var(--scaleY), '!important'); }
+		.pe-#{$i} { @include class-generator(padding-right,   $i, 1px, var(--scaleX), '!important'); }
+		  .gap-#{$i} { @include class-generator(gap,   $i, 1px, var(--scale), '!important'); }
+			.g-#{$i} { @include class-generator(gap,   $i, 1px, var(--scale), '!important'); }
+			  .gx-#{$i} { @include class-generator(gap,   $i, 1px, var(--scaleX), '!important'); }
+			  .gy-#{$i} { @include class-generator(gap,   $i, 1px, var(--scaleY), '!important'); }				
+    }
+  }
+  @include unit-class-generator();  
+
+  @mixin unit-percentages-class-generator() {
+    @for $p from 0 through 100 {
+      .w-#{$p} { width:  calc(1% * $p) !important; min-width:  calc(1% * $p) !important; min-width:  calc(1% * $p) !important; };
+      .h-#{$p} { height: calc(1% * $p) !important; min-height: calc(1% * $p) !important; min-height: calc(1% * $p) !important; };
+      // .w-#{$p} { width:  calc(vw * $p) !important; }
+      // .h-#{$p} { height: calc(vh * $p) !important; }
+      .mw-#{$p}, .min-h-#{$p} { min-width:  calc(1% * $p) !important; }
+      .mw-#{$p}, .min-h-#{$p} { min-height: calc(1% * $p) !important; }
+      .mw-#{$p}, .max-h-#{$p} { max-width:  calc(1% * $p) !important; }
+      .mxw-#{$p}, .max-h-#{$p} { max-height: calc(1% * $p) !important; }
+      .text-opacity-#{$p} { opacity: calc(1% * $p); }
+      .opacity-#{$p}      { opacity: calc(1% * $p); }
+		.o-#{$p}            { opacity: calc(1% * $p); }
+
+
+      .r-#{$p}  { border-radius: calc(1% * $p) !important; }
+      // [TODO] https://www.designcise.com/web/tutorial/how-to-apply-css-opacity-to-background-color-only
+      // .bg-opacity-#{$p} { }
+    }
+  }
+  @include unit-percentages-class-generator();
+
+}
+
+// @font-face {
+//   font-family: Pragmata Pro;
+//    src:
+//     local("PragmataPro"),
+//     url("../../public/fonts/Essential PPro-R_1.2.ttf") format("truetype"),
+//     url("../../public/fonts/Essential PPro-R_1.2.woff2") format("woff");
+//     font-weight: regular;
+// }
+// @font-face {
+//   font-family: Pragmata Pro;
+//    src:
+//     local("PragmataPro"),
+//     url("../../public/fonts/Essential PPro-B_1.2.ttf") format("truetype"),
+//     url("../../public/fonts/Essential PPro-B_1.2.woff2") format("woff");
+//     font-weight: bold;   
+// }
+
+.d-grid { display: grid; box-sizing: border-box; }
+.d-block { display: block; }
+.d-inline-block { display: inline-block; }
+.d-none { display: none !important; }
+.d-flex { display: flex; }
+.d-inline-flex { display: inline-flex; }
+.flex-column { flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-grow-1, .flex-grow { flex-grow: 1; }
+// https://stackoverflow.com/questions/11182559/text-align-is-not-working-on-safari-select
+.text-align-center { text-align: center; text-align-last: center; }
+.text-align-middle { text-align: middle; }
+.text-align-start { text-align: start; }
+.text-align-end { text-align: end; }
+.text-align-top { text-align: top; }
+.text-align-bottom { text-align: bottom; }
+.align-items-center { align-items: center; }
+.align-items-start { align-items: start; }
+.align-items-end { align-items: end; }
+.align-items-baseline { align-items: baseline; }
+.justify-content-center { justify-content: center; }
+.justify-content-start { justify-content: start; }
+.justify-content-end { justify-content: end; }
+.justify-space-around { justify-content: space-around; }
+.justify-space-between { justify-content: space-between; }
+.justify-space-evenly { justify-content: space-evenly; }
+.vertical-align-baseline { vertical-align: baseline; }
+.vertical-align-top { vertical-align: top; }
+.vertical-align-bottom { vertical-align: text-bottom; }
+.vertical-align-sub { vertical-align: sub; }
+.vertical-align-super { vertical-align: super; }
+.float-left { float: left; }
+.float-right { float: right; }
+.p-static, .position-static { position: static !important; }
+.p-relative, .p-rel, .position-relative { position: relative !important; }
+.p-absolute, .p-abs, .position-absolute { position: absolute !important; }
+.p-fixed, .position-fixed { position: fixed !important; }
+.p-sticky, .position-sticky, .pos-sticky { position: -webkit-sticky !important; position: sticky !important; }
+.left { left: 0px; }
+.right { right: 0px; }
+.top { top: 0px; }
+.bottom { bottom: 0px }
+.middle { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.middle-horiz { left: 50%; transform: translateX(-50%); }
+.middle-vert { top: 50%; transform: translateY(-50%); }
+// [todo] Explanation of why some of my animations feel sluggish: https://web.dev/articles/animations-guide
+.anim, .anim, .anim-xs { transition: all 125ms ease-in; }
+.anim-xs            { transition: all   33ms ease-in-out; }
+.anim-sm, .anim-s   { transition: all   75ms ease-in-out; }
+.anim-md            { transition: all  200ms ease-in-out; }
+.anim-l             { transition: all  800ms ease-in-out; }
+.anim-xl            { transition: all 1500ms ease-in-out; }
+.text-capitalize { text-transform: capitalize; }
+.text-strikethrough, .text-strike { text-decoration: line-through; }
+.fst-italic { font-style: italic; }
+.text-decoration-underline, .td-underline, .td-ul { text-decoration: underline; }
+.text-decoration-UNDERLINE, .td-UNDERLINE, .td-UL { text-decoration: underline !important; }
+.text-decoration-underline-none, .td-underline-none, .td-ul-none { text-decoration: none !important; }
+.td-ul-hover {
+ text-decoration:underline;
+ text-decoration-color: transparent;
+}
+.td-ul-hover:hover {
+  text-decoration-color: black;
+}
+// textarea {
+//    resize: none;
+//    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Oxygen, Ubuntu, Helvetica, Aria, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+//    outline: 1px solid var(--rgb-150);
+//    border: 2px solid transparent !important;
+// }
+// textarea:focus-visible, :focus-visible {
+//    border: 4px solid var(--primary) !important;
+//    outline: 2px solid var(--secondary) !important;
+// }
+// .text-shadow {
+//   text-shadow: 0.5px 1.5px 0px rgba(0, 0, 0, 0.5);
+//   text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+// }
+// .overflow-text, .truncate-text, .text-truncate {
+//   overflow: hidden;
+//   text-overflow: ellipsis;
+//   // white-space: pre;
+// }
+// .text-initial { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Oxygen, Ubuntu, Helvetica, Aria, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; }
+// .text-muted { color: var(--rgb-150); }
+// .text-monospace, .font-monospace, .monospace { font-family: Pragmata Pro, Courier New, Menlo, Consolas, Monaco, Courier New, Liberation Mono, Lucida Console, monospace; }
+// .text-serif, .font-serif, .serif { font-family: Iowan Old Style, Apple Garamond, Baskerville, Times New Roman, Droid Serif, Times, Source Serif Pro, serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol; }
+// .text-sans-serif, .font-sans-serif, .sans-serif { font-famiy: -apple-system, BlinkMacSystemFont, avenir next, avenir, segoe ui, helvetica neue, helvetica, Cantarell, Ubuntu, roboto, noto, arial, sans-serif; }
+
+.fw-lighter { font-weight: 100; }
+.fw-normal  { font-weight: 400; }
+.fw-bold    { font-weight: 700; }
+.fw-bolder  { font-weight: 900; }
+// SET ALL IN BREAKPOINTS NOW.
+// Note: This is backwards, but bootstrap only has up to fs-6. W/e.
+// .fs-00, .fs-00 *    { font-size:  5px;  line-height: 8px; }
+// .fs-0, .fs-0 *      { font-size: 12px;  line-height: 12px; }
+// "golden ratio" 
+// .fs-1, .fs-1 *      { font-size: 16px; }
+// .fs-2, .fs-2 *      { font-size: 26px; }
+// .fs-3, .fs-3 *      { font-size: 42px; }
+// .fs-4, .fs-4 *      { font-size: 68px; }
+// "perfect fourth"  - set in breakpoints
+// .fs-1, .fs-1 *      { font-size: 16px; }
+// .fs-2, .fs-2 *      { font-size: 21px; }
+// .fs-3, .fs-3 *      { font-size: 28px; }
+// .fs-4, .fs-4 *      { font-size: 38px; }
+// .fs-5, .fs-5 *      { font-size: 24px;  line-height: 24px; }
+// .fs-6, .fs-6 *      { font-size: 36px;  line-height: 27px; }
+// .fs-7, .fs-7 *      { font-size: 48px;  line-height: 52px; }
+// .fs-8, .fs-8 *      { font-size: 72px;  line-height: 72px; }
+// .lh-8, .lh-8 *       { line-height: 52px; } 
+// .lh-7, .lh-7 *       { line-height: 27px; } 
+// .lh-6, .lh-6 *       { line-height: 24px; } 
+// .lh-5, .lh-5 *       { line-height: 20px; } 
+// .lh-4, .lh-4 *       { line-height: 18px; } 
+// .lh-3, .lh-3 *       { line-height: 15px; } 
+// .lh-2, .lh-2 *       { line-height: 14px; } 
+// .lh-1, .lh-1 *       { line-height: 10px; } 
+// .lh-0, .lh-0 *       { line-height: 8px; }
+
+.m-auto { margin: auto; }
+.mt-auto { margin-top: auto; }
+.mb-auto { margin-bottom: auto; }
+.ms-auto { margin-left: auto; }
+.me-auto { margin-right: auto; }
+.border             { border:        1px solid; }
+.border-none        { border-weight: 0 !important; }
+.border-bottom      { border-bottom: 1px solid; }
+.border-top         { border-top:    1px solid; }
+.border-start, .border-left        { border-left:   1px solid; }
+.border-end, .border-right       { border-right:  1px solid; }
+.border-s, .border-sm { border-weight:        0.5px; }
+.border-m, .border-md { border-weight:        2px; }
+.border-l, .border-lg { border-weight:        3px ; }
+.border-xl          { border-weight:        4px ; }
+.border-dashed { border-style: dashed; }
+.border-box { box-sizing: border-box; }
+
+// having trouble using var in box-shadow...
+// .shadow-0 { box-shadow: var(--5) var(--5) 0 0 black; }
+// .shadow-0 { box-shadow: calc(1px * var(--0)) var(--0)calc(1px * var(--0)) 0 0 black; }
+// .shadow-1 { box-shadow: calc(1px * var(--1)) var(--1)calc(1px * var(--1)) 0 0 black; }
+// .shadow-2 { box-shadow: calc(1px * var(--2)) var(--2)calc(1px * var(--2)) 0 0 black; }
+// .shadow-3 { box-shadow: calc(1px * var(--3)) var(--3)calc(1px * var(--3)) 0 0 black; }
+// .shadow-4 { box-shadow: calc(1px * var(--4)) var(--4)calc(1px * var(--4)) 0 0 black; }
+// .shadow-5 { box-shadow: calc(1px * var(--5)) var(--5)calc(1px * var(--5)) 0 0 black; }
+// .shadow-6 { box-shadow: calc(1px * var(--6)) var(--6)calc(1px * var(--6)) 0 0 black; }
+// .shadow-7 { box-shadow: calc(1px * var(--7)) var(--7)calc(1px * var(--7)) 0 0 black; }
+// .shadow-8 { box-shadow: calc(1px * var(--8)) var(--8)calc(1px * var(--8)) 0 0 black; }
+.shadow-xs { box-shadow: -1px 1px 0px 1px rgba(41, 41, 41, 0.25) !important; }
+.shadow-s, .shadow-sm { box-shadow: -3px 4px 0px     rgba(41, 41, 41, 0.33) !important; }
+.shadow-s-e { box-shadow: -6px 2px 0px     rgba(41, 41, 41, 0.33) !important; }
+.shadow-md, .shadow-m { box-shadow: -3px 6px 4px     rgba(41, 41, 41, 0.44) !important; }
+.shadow-lg, .shadow-l { box-shadow: -5px 8px 6px     rgba(41, 41, 41, 0.80) !important; }
+.shadow-inset-xs { box-shadow: -2px 2px 0px 2px rgba(41, 41, 41, 0.25) inset; }
+.shadow-inset-sm { box-shadow: -3px 4px 0px     rgba(41, 41, 41, 0.33) inset; }
+.shadow-inset-md { box-shadow: -3px 6px 4px     rgba(41, 41, 41, 0.44) inset; }
+.shadow-inset-lg { box-shadow: -5px 8px 6px     rgba(41, 41, 41, 0.80) inset; }
+.blur-sm { filter: blur(1.5px); }
+.blur-md { filter: blur(2.0px); }
+.blur-lg { filter: blur(5px); }
+.icon-muted, .muted {
+  // https://isotropic.co/tool/hex-color-to-css-filter/
+  filter: invert(58%) sepia(8%) saturate(0%) hue-rotate(194deg) brightness(100%) contrast(97%);
+}
+.cursor-pointer  { cursor: pointer; }
+.cursor-pointer:hover, .cursor-pointer:focus { }
+.cursor-progress { cursor: progress; }
+.cursor-disabled { cursor: not-allowed; }
+.cursor-unset { cursor: unset; }
+.cursor-default { cursor: default; }
+.user-select-none, .select-none { user-select: none; }
+.pe-none { pointer-events: none !important; user-select: none; }
+.whitespace-nowrap { white-space: nowrap; }
+.whitespace-pre-wrap { white-space: pre-wrap; }
+.whitespace-break-space { white-space: break-space; }
+.whitespace-min-content { white-space: min-content; }
+.word-wrap-anywhere { word-wrap: anywhere; }
+.overflow-hidden { overflow: hidden !important; }
+.overflow-initial { overflow: initial; }
+.overflow-inherit { overflow: inherit; }
+.overflow-scroll { overflow: scroll; }
+.overflow-y-scroll { overflow-y: scroll; }
+.overflow-x-scroll { overflow-x: scroll; }
+.overflow-x-hidden { overflow-x: hidden !important; }
+.overflow-y-hidden { overflow-y: hidden; }
+.overflow-wrap { overflow-wrap: anywhere; }
+.overflow-scroll, .overflow-y-scroll, .overflow-x-scroll, textarea {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: thin !important;  /* Firefox */
+}
+.scrollbar-hidden, .scrollbar-hidden::-webkit-scrollbar {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
+} 
+.scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+} 
+.scrollbar-thin { scrollbar-width: thin; }
+.scrollbar-normal { scrollbar-width: initial; }
+.scrollbar-left { direction: rtl; }
+// https://developer.mozilla.org/en-US/docs/Web/CSS/overscroll-behavior-y
+.overscroll-y-none { overscroll-behavior-y: none; }
+.overscroll-x-none { overscroll-behavior-x: none; }
+.no-aa, .crisp-edges, .image-rendering-crisp {
+    image-rendering: optimizeSpeed;             /* STOP SMOOTHING, GIVE ME SPEED  */
+    image-rendering: -moz-crisp-edges;          /* Firefox                        */
+    image-rendering: -o-crisp-edges;            /* Opera                          */
+    image-rendering: -webkit-optimize-contrast; /* Chrome (and eventually Safari) */
+    image-rendering: pixelated;                 /* Universal support since 2021   */
+    image-rendering: optimize-contrast;         /* CSS3 Proposed                  */
+    -ms-interpolation-mode: nearest-neighbor;   /* IE8+                           */
+}
+.disabled {
+  // color: var(--rgb-125) !important;
+  // background-color: var(--rgb-200) !important;
+  // filter: invert(58%) sepia(8%) saturate(0%) hue-rotate(194deg) brightness(100%) contrast(97%);
+  // border-color: var(--rgb-20) !important;
+}
+
+// Touch-target utilities - ensures minimum tap area for mobile
+.touch-target {
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+}
+.touch-target-lg {
+  min-height: var(--touch-target);
+  min-width: var(--touch-target);
+}
+
+// Safe area padding for notched devices
+.safe-area-top { padding-top: var(--safe-area-top); }
+.safe-area-bottom { padding-bottom: var(--safe-area-bottom); }
+.safe-area-left { padding-left: var(--safe-area-left); }
+.safe-area-right { padding-right: var(--safe-area-right); }
+.safe-area-x { padding-left: var(--safe-area-left); padding-right: var(--safe-area-right); }
+.safe-area-y { padding-top: var(--safe-area-top); padding-bottom: var(--safe-area-bottom); }
+.safe-area {
+  padding-top: var(--safe-area-top);
+  padding-bottom: var(--safe-area-bottom);
+  padding-left: var(--safe-area-left);
+  padding-right: var(--safe-area-right);
+}
+
+
+// https://css-tricks.com/adding-stroke-to-web-text/
+.text-stroke-primary {
+  -webkit-text-stroke: 1.5px var(--primary);
+}
+.text-stroke {
+  -webkit-text-stroke: 0.75px white;
+  // -webkit-text-fill-color: transparent;
+  // -webkit-text-stroke-color: rgb(var(--primary) / 10);
+  // -webkit-text-stroke-weight: 3px;
+  // -webkit-text-fill-color: rgb(var(--primary) / 1);
+}
+// https://css-tricks.com/nerds-guide-color-web/
+// https://sass-lang.com/documentation/modules/
+// ^ stuff like rgba(var(--primary) /10) in sass to get 10% primary

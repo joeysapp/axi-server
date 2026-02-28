@@ -27,5 +27,14 @@ backend/public/
 # Test artifacts
 coverage/
 
-# Misc
-deploy.sh
+# Working notes
+BUILD.md
+
+# Reference files (not part of this project)
+deploy-ref/
+
+# Deploy artifacts
+deploy-kblob.sh
+*.tar.gz
+.deploy-pkg/
+.react-router

@@ -1,117 +1,76 @@
-# AxiDraw HTTP Server
+# axi-lab
 
-A robust HTTP REST and WebSocket API server for controlling AxiDraw plotters via direct EBB (EiBotBoard) serial commands. Built from scratch with Node.js, eliminating the need for `pyaxidraw` while providing full control over the hardware.
+Real-time multiplayer control interface for AxiDraw pen plotters. A Node.js backend communicates directly with the EiBotBoard over serial, while a React/Three.js frontend provides 3D visualization of the plotter workspace with live cursor presence for all connected clients.
 
-## Features
-- **Direct EBB Communication:** Raw serial protocol implementation, no Python dependencies.
-- **Narrow-Band Servo Support:** Full support for standard and upgraded brushless lift motors.
-- **REST & WebSocket APIs:** Simple endpoints and real-time WebSocket streams for all operations.
-- **Job Queue:** Queue multiple drawings with priority support.
-- **SVG Support:** Parse and plot SVG files directly.
-- **Auto-Discovery:** Automatically finds connected AxiDraw devices.
+## Architecture
+
+```
+Browser (SPA)  ──WebSocket──▶  Node.js backend  ──Serial──▶  AxiDraw EBB
+   │                              │
+   ├─ Three.js 3D canvas          ├─ Spatial processor (velocity/position)
+   ├─ Remote cursor rendering      ├─ Client presence (identity, cursors)
+   └─ Mantine UI controls          ├─ REST API (pen, move, SVG, queue)
+                                   └─ Direct EBB serial commands
+```
+
+**Frontend:** React Router v7 SPA, React Three Fiber, Mantine, Framer Motion
+**Backend:** Node.js, `ws`, `serialport` — no Python dependencies
 
 ## Quick Start
 
 ```bash
 npm install
-npm start
-
-# Or with with environment variables:
-AXIDRAW_PORT=9700 AXIDRAW_NARROW_BAND=false npm start
+npm start              # Backend on :9700 (serves frontend from backend/public/)
 ```
+
+```bash
+# Build the frontend SPA into backend/public/
+npm run build-ui
+
+# Or develop frontend separately
+cd frontend && npm install && npm run dev
+```
+
+## Multi-Client
+
+Multiple browser tabs/devices connect to one backend via WebSocket. All clients share the same plotter state and see each other's cursors rendered as colored 3D markers on the canvas. Any client can send commands (last-write-wins).
+
+Set the server URL in the settings drawer when connecting remotely.
+
+## Deploy
+
+Deploy to a remote server (frontend as static files via nginx, backend as a systemd service):
+
+```bash
+# First time — sets up server, installs deps, deploys everything
+./deploy/scripts/deploy.sh --first-run
+
+# Subsequent deploys
+./deploy/scripts/deploy.sh
+
+# Frontend-only update
+./deploy/scripts/deploy.sh --frontend
+```
+
+See `deploy/` for nginx config, systemd unit, and the deploy script.
 
 ## Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AXIDRAW_PORT` | `9700` | HTTP server port |
-| `AXIDRAW_HOST` | `0.0.0.0` | HTTP server host |
+| `AXIDRAW_PORT` | `9700` | Server port |
+| `AXIDRAW_HOST` | `0.0.0.0` | Server bind address |
 | `AXIDRAW_SERIAL` | `auto` | Serial port path |
-| `AXIDRAW_AUTO_CONNECT` | `true` | Auto-connect on startup |
-| `AXIDRAW_NARROW_BAND` | `true` | Use narrow-band brushless servo |
-| `AXIDRAW_MODEL` | `V2_V3` | AxiDraw model (`V2_V3`, `V3_A3`, `V3_XLX`, `MiniKit`, `SE_A1`, `SE_A2`) |
+| `AXIDRAW_AUTO_CONNECT` | `true` | Connect to plotter on startup |
+| `AXIDRAW_NARROW_BAND` | `true` | Brushless servo mode |
+| `AXIDRAW_MODEL` | `V2_V3` | Model: `V2_V3`, `V3_A3`, `V3_XLX`, `MiniKit`, `SE_A1`, `SE_A2` |
 
-## API Overview
+## API
 
-### Basic Endpoints
-- `GET /health` - Health check
-- `GET /status` - Get system status
-- `GET /info` - Verbose info
-- `POST /connect` - Connect to AxiDraw
-- `POST /pen/up` / `POST /pen/down` - Pen control
-- `POST /move` / `POST /moveto` - Movement commands
-- `POST /home` - Go home
-- `POST /svg` - Draw SVG
-- `POST /queue` - Queue commands
+**REST:** `GET /health`, `GET /status`, `POST /pen/up`, `POST /pen/down`, `POST /move`, `POST /home`, `POST /svg`, `POST /queue`, `GET /path`
 
-## EBB Serial Roadmap
+**WebSocket** (`ws://host:9700/spatial`): Bidirectional spatial state streaming — position, velocity, orientation, pen state, and client presence.
 
-The goal is to build out comprehensive logic around low-level serial commands to maintain and synchronize the AxiDraw's logical state with its actual physical state.
+## License
 
-### Priority 1: Physical vs Logical State Synchronization
-- **State Recovery on Boot/Reset:** Implement logic to query `QS` (Query Step) and `QE` (Query Motors) on connection to determine if the AxiDraw has lost its home position.
-- **Boot/Shutdown/Reset Care:** Handle transition states (connect/disconnect/reboot) gracefully by asserting known values and querying hardware before assuming position.
-- **Home Position Assertion:** Develop a protocol for "confirming" home, potentially using `QB` (Query Button) or limit switches if available, to prevent the "AxiDraw thinks it is at 0,0 but is actually at 100,100" scenario.
-
-### Priority 2: FIFO and Buffer Health Monitoring
-- **Real-time FIFO Querying:** Use `QU,3` and `QU,6` to monitor the motion buffer during active jobs to prevent underruns or overflows.
-- **Dynamic Speed/Damping Adjustments:** Use `CU` commands to optimize the AxiDraw's own movement planning based on current job complexity.
-
-### Priority 3: Advanced Predictive Algorithms
-- **Predictive Positioning:** Use `QS` during active movement to refine the frontend's 3D visualization, providing a "live" position that accounts for serial latency.
-- **Health Diagnostics:** Monitor `QC` (Query Voltage) and `QU,4` (Stack High Water) to alert the user of potential hardware power issues or firmware instability before a job fails.
-
-## Backend and Frontend Spatial States
-### Coordinate System
-- **AxiDraw Surface**: Represented as a 2D plane in 3D space.
-- **X-Axis**: Matches AxiDraw X (Right).
-- **Y-Axis**: Matches AxiDraw Y (Down). In Three.js, we use `-Y` to maintain the "downward is positive" logic of the plotter while staying in a standard right-handed coordinate system.
-- **Z-Axis**: Used for pen height and 3D object projection.
-
-### Vector Representation
-1. **Position**: `THREE.Vector3(x, -y, 0)`
-2. **Velocity**: Represented by `VersorComponent` (bar charts) and planned as arrows in 3D space using `THREE.ArrowHelper`.
-3. **Orientation (Quaternion)**: 
-   - The AxiDraw spatial state includes a quaternion `{x, y, z, w}`.
-   - Visually represented in `ThreeCanvas` by applying the quaternion to a group containing a "pen" object (cylinder) and an orientation indicator (box).
-   - This allows visualizing the "tilt" or "direction" if the plotter had such degrees of freedom, or for projecting 3D orientations onto the 2D plane.
-
-## Roadmap
-
-### 1. Frontend Evolution (Next Priorities)
-- **React Migration:** Migrate the single-file HTML frontend to a modern React application.
-- **Interactive Canvas:** Implement interactive SVG manipulation on the canvas (positioning, scaling, and rotation) prior to printing.
-
-### 2. Generative Art Module
-- Macros for procedural pattern generation (spirals, fractals, flow fields).
-- Parametric shape generators and novel movement macros.
-- Random seed-based reproducible art.
-
-### 3. Advanced Motion Planning
-- Bezier curve optimization.
-- Travel path optimization (TSP) for faster plots.
-- Acceleration/deceleration profiles.
-
-### 4. Machine Vision & AI
-- Webcam monitoring for visual progress, out-of-ink detection, and timelapses.
-- Image to SVG tracing (Potrace integration).
-- Neural style transfer pipelines.
-
-### 3D to 2D Projection
-To project 3D objects (like GLTF models) onto the AxiDraw's 2D plane:
-1. **Camera Mapping**: Use the `THREE.Camera` projection matrix to transform 3D vertices into normalized device coordinates (NDC).
-2. **Scaling**: Transform NDC `[-1, 1]` to AxiDraw bounds `[0, maxX]` and `[0, maxY]`.
-3. **Path Generation**: Extract edges or wireframes from the 3D model, project them, and send as a series of `moveTo`/`lineTo` commands.
-
-## Library Roadmap
-- **@react-three/fiber**: (Installed) Core rendering.
-- **@react-three/drei**: (Installed) Helpers like `OrbitControls`, `Grid`, `PerspectiveCamera`.
-- **three/addons/renderers/SVGRenderer.js**: (Available in `three`) For rendering the 3D scene back into an SVG for storage or local plotting.
-- **lucide-react**: (Planned) For consistent iconography.
-
-## Goal State
-The intent of this project is to serve as a comprehensive tool to monitor and control the AxiDraw remotely. The frontend aims to be an intuitive, cross-platform interface providing novel movements, shapes, and macros through the UI using WebSocket (or REST for headless control) with a strong focus on Generative Art.
-
-## Current State
-- **Backend:** Node.js REST and WebSocket API communicating directly with the EiBotBoard over serial.
-- **Frontend:** A lightweight, framework-agnostic single-file control panel (`src/public/index.html`) offering essential control, job queuing, high-DPI canvas path rendering, and D-Pad movement.
+MIT

@@ -1,0 +1,164 @@
+/*
+https://codelucky.com/css-resolution-media-queries/
+
+DPI (Dots Per Inch)
+The traditional print-based unit, where 96 DPI equals standard screen resolution. Common values include 96dpi (1x), 192dpi (2x), and 288dpi (3x).
+
+DPPX (Dots Per Pixel)
+The most intuitive unit for web developers, directly corresponding to device pixel ratios. Values like 1dppx (standard), 2dppx (Retina), and 3dppx (high-end mobile) are common.
+
+DPCM (Dots Per Centimeter)
+Less commonly used but useful for international applications where metric measurements are preferred.
+Conversion Reference:
+
+    1dppx = 96dpi = 37.8dpcm
+    2dppx = 192dpi = 75.6dpcm
+    3dppx = 288dpi = 113.4dpcm
+*/
+  body {
+	height: calc(var(--viewport-height, 100vh) + 1px);
+	overflow: scroll;
+  }
+
+:root {
+  --device: 'desktop';
+  @media only screen and (min-device-width: 768px) and (max-device-width: 1024px) and (orientation: portrait) {
+    /* Phone - Portrait view - Doing nothing */
+	--device: "mobile-portrait";
+  }
+  @media only screen  and (min-device-width: 768px)  and (max-device-width: 1024px)  and (orientation: landscape) {
+    /* Phone - Landscape view */
+	--device: "mobile-landscape";
+  }  
+
+  // https://css-tricks.com/the-trick-to-viewport-units-on-mobile/
+  // https://stackoverflow.com/a/33222847
+  // For iPhone, you can make your content just one pixel higher than the viewport, that will eliminate the navbar
+  --viewport-height: 100;  
+  --viewport-width: 1;
+
+  // Used for
+  --scale: 4;
+  --scaleX: 4;
+  --scaleY: 4;
+  
+  margin: 0;
+  // min-height: 100vh; min-width: 100vw;
+  // overflow: hidden;
+  // line-height: 1.1;
+  // color: black;
+
+  --fs: 12px;
+.fs-1, .fs-1 *      { font-size: calc(1    * var(--fs)); }
+.fs-2, .fs-2 *      { font-size: calc(1.33 * var(--fs)); }
+.fs-3, .fs-3 *      { font-size: calc(1.70 * var(--fs)); }
+.fs-4, .fs-4 *      { font-size: calc(2.12 * var(--fs)); }	  
+  /* Standard displays (>1.5 dots per pixel) -- no clue what this is */
+  @media (max-resolution: 1.5dppx) {
+	html, body {
+	  font-size: 12px;
+	  --fs: 12px;
+	}
+	.product-image {
+      // background-image: url('product-1x.webp');
+	}
+  }
+
+  /* Mid-range high-DPI (1.5x-2x dots per pixel) -- supposedly desktop?*/
+  @media (min-resolution: 1.5dppx) and (max-resolution: 2.5dppx) {
+	html, body {
+	  font-size: 16px;
+	  --fs: 16px;
+	}	
+	.product-image {
+      // background-image: url('product-2x.webp');
+	}
+  }
+
+  /* Premium high-DPI (2.5 and above dots per pixel) -- hits my iPhone Pro */
+  // 38px seems to be ~roughly the smallest text I can read easily from a distance.
+  @media (min-resolution: 2.5dppx) {
+	html, body * {
+	  font-size: 36px;
+	  --fs: 36px;	  
+	}	
+	.product-image {
+      // background-image: url('product-3x.webp');
+	}
+  }
+
+  // Touch-friendly sizing (44px Apple HIG, 48px Material)
+  --touch-target-min: 44px;
+  --touch-target: 48px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  // Safe area insets for notched devices
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);  
+
+  // @media(min-width: 700px) { --scalar: 1.0; --scalarX: 1.0; --scalarY: 1.0; --device: 'desktop'; }
+  // @media(max-width: 700px) { --scalar: 1.0; --scalarX: 1.0; --scalarY: 1.0; --device: 'phone'; }
+  // 
+  // @media only screen and (-webkit-min-device-pixel-ratio: 1.5),  only screen and (min--moz-device-pixel-ratio: 1.5), only screen and (min-device-pixel-ratio: 1.5) {
+  //   /* Phone - Literally doing nothing */
+  // 	html, body {
+  // 	  // font-size: 1.5rem;
+  // 	}
+  // } 
+
+  // @supports (-webkit-text-stroke: 1px black) {
+  //   h1 {
+  //     -webkit-text-stroke: 1px black;
+  //     -webkit-text-fill-color: white;
+  //   }
+  // }          
+}
+
+// /* Base styles for mobile (320px - 480px) */
+// body {
+//   font-size: 14px;
+//   padding: 16px;
+//   line-height: 1.5;
+// }
+// 
+// /* Small tablets and larger mobile devices (481px - 768px) */
+// @media (min-width: 481px) {
+//   body {
+//     font-size: 15px;
+//     padding: 20px;
+//   }
+// }
+// 
+// /* Tablets and small laptops (769px - 1024px) */
+// @media (min-width: 769px) {
+//   body {
+//     font-size: 16px;
+//     padding: 24px;
+//     max-width: 90%;
+//     margin: 0 auto;
+//   }
+// }
+// 
+// /* Large desktops and high-resolution screens (1025px and up) */
+// @media (min-width: 1025px) {
+//   body {
+//     font-size: 18px;
+//     padding: 32px;
+//     max-width: 80%;
+//   }
+// }
+// 
+// /* Extra-large screens (1440px and up) */
+// @media (min-width: 1440px) {
+//   body {
+//     font-size: 20px;
+//     padding: 40px;
+//     max-width: 70%;
+//   }
+// }
+// 
+// 
